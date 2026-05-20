@@ -1,14 +1,14 @@
 /**:
   ros__parameters:
-    resolution: 0.05
-    width: 500
-    height: 500
-    origin_x: -12.5
-    origin_y: -12.5
-    hit_probability: 0.70
-    free_probability: 0.35
-    log_odds_min: -10.0
-    log_odds_max: 10.0
+    map_resolution: 0.05
+    map_width: 500
+    map_height: 500
+    map_origin_x: -12.5
+    map_origin_y: -12.5
+    map_hit_probability: 0.70
+    map_free_probability: 0.35
+    map_log_odds_min: -10.0
+    map_log_odds_max: 10.0
     publish_period_ms: 500
     use_ground_truth_pose: false
     ground_truth_topic: /ground_truth_pose

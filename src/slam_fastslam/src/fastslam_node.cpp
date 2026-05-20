@@ -48,7 +48,6 @@ public:
   : Node("fastslam_node")
   {
     loadParameters();
-    configureMapConfig();
     fast_slam_.configure(parameters_, map_config_);
 
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
@@ -178,14 +177,18 @@ private:
       static_cast<int>(declare_parameter<int>("map_height", map_config_.height));
     map_config_.width = std::max(1, map_width);
     map_config_.height = std::max(1, map_height);
-  }
-
-  void configureMapConfig()
-  {
-    map_config_.origin_x =
-      -static_cast<double>(map_config_.width) * map_config_.resolution / 2.0;
-    map_config_.origin_y =
-      -static_cast<double>(map_config_.height) * map_config_.resolution / 2.0;
+    map_config_.origin_x = declare_parameter<double>(
+      "map_origin_x", -static_cast<double>(map_config_.width) * map_config_.resolution / 2.0);
+    map_config_.origin_y = declare_parameter<double>(
+      "map_origin_y", -static_cast<double>(map_config_.height) * map_config_.resolution / 2.0);
+    map_config_.hit_probability =
+      declare_parameter<double>("map_hit_probability", map_config_.hit_probability);
+    map_config_.free_probability =
+      declare_parameter<double>("map_free_probability", map_config_.free_probability);
+    map_config_.log_odds_min =
+      declare_parameter<double>("map_log_odds_min", map_config_.log_odds_min);
+    map_config_.log_odds_max =
+      declare_parameter<double>("map_log_odds_max", map_config_.log_odds_max);
   }
 
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)

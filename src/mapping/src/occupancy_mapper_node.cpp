@@ -20,17 +20,17 @@ public:
   : Node("mapping_node")
   {
     OccupancyMapper::Config config;
-    config.resolution = declare_parameter<double>("resolution", 0.05);
-    config.width = declare_parameter<int>("width", 500);
-    config.height = declare_parameter<int>("height", 500);
+    config.resolution = declare_parameter<double>("map_resolution", 0.05);
+    config.width = declare_parameter<int>("map_width", 500);
+    config.height = declare_parameter<int>("map_height", 500);
     config.origin_x = declare_parameter<double>(
-      "origin_x", -static_cast<double>(config.width) * config.resolution / 2.0);
+      "map_origin_x", -static_cast<double>(config.width) * config.resolution / 2.0);
     config.origin_y = declare_parameter<double>(
-      "origin_y", -static_cast<double>(config.height) * config.resolution / 2.0);
-    config.hit_probability = declare_parameter<double>("hit_probability", 0.90);
-    config.free_probability = declare_parameter<double>("free_probability", 0.05);
-    config.log_odds_min = declare_parameter<double>("log_odds_min", -10.0);
-    config.log_odds_max = declare_parameter<double>("log_odds_max", 10.0);
+      "map_origin_y", -static_cast<double>(config.height) * config.resolution / 2.0);
+    config.hit_probability = declare_parameter<double>("map_hit_probability", 0.90);
+    config.free_probability = declare_parameter<double>("map_free_probability", 0.05);
+    config.log_odds_min = declare_parameter<double>("map_log_odds_min", -10.0);
+    config.log_odds_max = declare_parameter<double>("map_log_odds_max", 10.0);
     const int publish_period_ms = declare_parameter<int>("publish_period_ms", 500);
     use_ground_truth_pose_ = declare_parameter<bool>("use_ground_truth_pose", false);
     ground_truth_topic_ = declare_parameter<std::string>(

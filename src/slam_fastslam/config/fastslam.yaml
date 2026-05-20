@@ -1,6 +1,6 @@
 fastslam_node:
   ros__parameters:
-    num_particles: 20
+    num_particles: 30
     scan_beam_step: 10
     ray_occupied_threshold: 65
     ray_occupied_crossing_penalty: 2.0
@@ -8,10 +8,6 @@ fastslam_node:
     ray_endpoint_margin_cells: 2
     likelihood_max_distance: 0.5
     likelihood_sigma: 0.20
-
-    map_resolution: 0.05
-    map_width: 500
-    map_height: 500
 
     translation_noise_from_translation: 0.03
     translation_noise_from_rotation: 0.005

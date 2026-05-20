@@ -6,8 +6,10 @@ import os
 
 
 def generate_launch_description():
-    package_share_dir = get_package_share_directory("slam_fastslam")
-    config_file = os.path.join(package_share_dir, "config", "fastslam.yaml")
+    fastslam_config = os.path.join(
+        get_package_share_directory("slam_fastslam"), "config", "fastslam.yaml")
+    mapping_config = os.path.join(
+        get_package_share_directory("mapping"), "config", "mapping.yaml")
 
     return LaunchDescription([
         Node(
@@ -15,6 +17,6 @@ def generate_launch_description():
             executable="fastslam_node",
             name="fastslam_node",
             output="screen",
-            parameters=[config_file],
+            parameters=[mapping_config, fastslam_config],
         ),
     ])
