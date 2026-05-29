@@ -1,6 +1,9 @@
 #include "graph_pose_slam/graph_pose_slam.hpp"
 
+#include <chrono>
 #include <cmath>
+
+#include "rclcpp/rclcpp.hpp"
 
 namespace graph_pose_slam
 {
@@ -43,7 +46,20 @@ IcpResult GraphPoseSlam::addKeyframe(
     // Use the odom delta between the two keyframes as the initial guess for ICP.
     // This pre-aligns the new scan so ICP only refines a small residual error.
     const Pose2D odom_delta = computeOdomDelta(prev_keyframe_odom_, odom_pose);
+
+    const auto t0 = std::chrono::steady_clock::now();
     result = scan_matcher_.match(prev_keyframe_points_, current_points, odom_delta);
+    const double icp_ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+
+    RCLCPP_INFO(
+      rclcpp::get_logger("graph_pose_slam"),
+      "ICP: %d pts, %d iters, mean_err=%.4f m, time=%.2f ms%s",
+      static_cast<int>(current_points.size()),
+      result.iterations,
+      result.mean_error,
+      icp_ms,
+      icp_ms > 10.0 ? "  <-- SLOW" : "");
 
     // Compose the ICP result into the running world pose estimate.
     // result.transform is in the previous keyframe's local frame, so we
@@ -82,23 +98,14 @@ Pose2D GraphPoseSlam::computeOdomDelta(
   const Pose2D & odom_at_a,
   const Pose2D & odom_at_b) const
 {
-  // Compute the transform from scan B's local frame into scan A's local frame,
-  // derived purely from the two odometry readings.
-  //
-  // Any world point seen in scan B at (bx, by) appears in scan A's frame at:
-  //   ax = cos(θ_a) * (bx_world - x_a) + sin(θ_a) * (by_world - y_a)
-  //   ay = -sin(θ_a) * (bx_world - x_a) + cos(θ_a) * (by_world - y_a)
-  //
-  // The rotation is θ_b - θ_a; the translation is R(-θ_a) * (t_b - t_a).
-
   const double dx_world = odom_at_b.x - odom_at_a.x;
   const double dy_world = odom_at_b.y - odom_at_a.y;
   const double cos_a = std::cos(odom_at_a.theta);
   const double sin_a = std::sin(odom_at_a.theta);
 
   return Pose2D{
-    cos_a * dx_world + sin_a * dy_world,    // translation in A's x-axis
-    -sin_a * dx_world + cos_a * dy_world,   // translation in A's y-axis
+    cos_a * dx_world + sin_a * dy_world,
+    -sin_a * dx_world + cos_a * dy_world,
     normalizeAngle(odom_at_b.theta - odom_at_a.theta)
   };
 }

@@ -1,4 +1,4 @@
-#include "graph_pose_slam/scan_matcher.hpp"
+#include "graph_pose_slam/icp_scan_matcher.hpp"
 
 #include <cmath>
 #include <limits>

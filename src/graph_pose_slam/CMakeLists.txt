@@ -12,17 +12,10 @@ find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
-
 # Core SLAM library (no ROS node, easy to unit test)
 add_library(graph_pose_slam_core
   src/graph_pose_slam.cpp
-  src/scan_matcher.cpp
+  src/icp_scan_matcher.cpp
 )
 
 target_include_directories(graph_pose_slam_core PUBLIC
@@ -31,6 +24,7 @@ target_include_directories(graph_pose_slam_core PUBLIC
 
 ament_target_dependencies(graph_pose_slam_core
   builtin_interfaces
+  rclcpp
   sensor_msgs
 )
 
@@ -56,9 +50,25 @@ target_link_libraries(graph_pose_slam_node
   graph_pose_slam_core
 )
 
+# Standalone ICP test script — run with: ros2 run graph_pose_slam test_icp_scan_matcher
+add_executable(test_icp_scan_matcher
+  test/test_icp_scan_matcher.cpp
+)
+
+target_include_directories(test_icp_scan_matcher PUBLIC
+  include
+)
+
+ament_target_dependencies(test_icp_scan_matcher sensor_msgs)
+
+target_link_libraries(test_icp_scan_matcher
+  graph_pose_slam_core
+)
+
 install(TARGETS
   graph_pose_slam_core
   graph_pose_slam_node
+  test_icp_scan_matcher
   DESTINATION lib/${PROJECT_NAME}
 )
 
