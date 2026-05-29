@@ -18,8 +18,9 @@ struct Point2D
 
 struct IcpResult
 {
-  Pose2D transform{};       // refined transform: from scan_b frame into scan_a frame
-  double mean_error{0.0};   // mean correspondence distance at the final iteration
+  Pose2D transform{};         // refined transform: from scan_b frame into scan_a frame
+  double mean_error{0.0};     // mean distance between matched pairs at the final iteration
+  double overlap_ratio{0.0};  // fraction of scan_b points that found a match in scan_a
   int iterations{0};
   bool converged{false};
 };
@@ -30,6 +31,10 @@ struct ScanMatcherOptions
   double max_correspondence_dist{0.5};   // metres — pairs farther than this are rejected
   double convergence_translation{1e-4};  // metres — stop when delta is below this
   double convergence_rotation{1e-4};     // radians
+  // Stricter threshold used only for overlap_ratio reporting.
+  // Should be ~2-3x lidar noise stddev (e.g. 2 * 0.01 m = 0.02 m).
+  // Kept separate from max_correspondence_dist so matching is not affected.
+  double icp_overlap_dist{0.02};         // metres
 };
 
 class ScanMatcher

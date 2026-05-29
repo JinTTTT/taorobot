@@ -21,10 +21,10 @@ odometry_noise_node:
     #   - Increase alpha3 to make the robot curve while driving straight
     #   - Set all to 0.0 to recover perfect (Gazebo) odometry
 
-    alpha1: 0.1    # linear noise from linear motion
-    alpha2: 0.01   # linear noise from angular motion
-    alpha3: 0.01   # angular noise from linear motion
-    alpha4: 0.1    # angular noise from angular motion
+    alpha1: 0.001   # linear noise from linear motion  (~3% speed noise, matches TurtleBot3 on smooth floor)
+    alpha2: 0.001   # linear noise from angular motion  (small lateral slip during turns)
+    alpha3: 0.001   # angular noise from linear motion  (~0.14 deg heading drift per metre)
+    alpha4: 0.005   # angular noise from angular motion  (small turn rate error)
 
     input_topic:  "/odom_raw"
     output_topic: "/odom"

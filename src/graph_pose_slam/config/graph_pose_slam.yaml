@@ -6,6 +6,9 @@ graph_pose_slam_node:
 
     # ICP scan matching
     icp_max_iterations: 30
-    icp_max_correspondence_dist: 0.2     # metres — reject pairs farther than this
+    icp_max_correspondence_dist: 0.2     # metres — reject pairs farther than this during matching
     icp_convergence_translation: 0.0001  # metres — stop when delta falls below this
     icp_convergence_rotation: 0.0001     # radians
+    icp_overlap_dist: 0.02               # metres — a point counts as overlapping only if its
+                                         #   nearest neighbour is closer than this after alignment.
+                                         #   set to ~2x lidar noise stddev (lidar stddev = 0.01 m)

@@ -214,6 +214,18 @@ IcpResult ScanMatcher::match(
     result.mean_error = sum_dist / static_cast<double>(valid_pairs);
     result.iterations = iter + 1;
 
+    // Overlap ratio: fraction of scan_b points whose nearest neighbour in scan_a
+    // is within the strict inlier threshold (not the loose matching threshold).
+    // This gives a meaningful measure of how much of the scene the two scans share.
+    int inliers = 0;
+    for (const double d : distances) {
+      if (std::isfinite(d) && d <= options_.icp_overlap_dist) {
+        ++inliers;
+      }
+    }
+    result.overlap_ratio = static_cast<double>(inliers) /
+                           static_cast<double>(scan_b_in_a_frame.size());
+
     // Step 2: compute the small correction transform that best fits the
     //         current correspondences.
     const Pose2D step_delta = computeTransform(scan_b_in_a_frame, points_a, indices);

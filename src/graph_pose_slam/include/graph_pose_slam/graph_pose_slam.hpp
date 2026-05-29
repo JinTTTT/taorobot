@@ -20,6 +20,7 @@ struct GraphPoseSlamParameters
   double icp_max_correspondence_dist{0.2};      // metres
   double icp_convergence_translation{1e-4};     // metres
   double icp_convergence_rotation{1e-4};        // radians
+  double icp_overlap_dist{0.02};                // metres — strict threshold for overlap reporting only
 };
 
 class GraphPoseSlam

@@ -16,7 +16,8 @@ void GraphPoseSlam::configure(const GraphPoseSlamParameters & params)
   icp_options.max_iterations = params_.icp_max_iterations;
   icp_options.max_correspondence_dist = params_.icp_max_correspondence_dist;
   icp_options.convergence_translation = params_.icp_convergence_translation;
-  icp_options.convergence_rotation = params_.icp_convergence_rotation;
+  icp_options.convergence_rotation  = params_.icp_convergence_rotation;
+  icp_options.icp_overlap_dist      = params_.icp_overlap_dist;
   scan_matcher_.configure(icp_options);
 }
 
@@ -54,9 +55,10 @@ IcpResult GraphPoseSlam::addKeyframe(
 
     RCLCPP_INFO(
       rclcpp::get_logger("graph_pose_slam"),
-      "ICP: %d pts, %d iters, mean_err=%.4f m, time=%.2f ms%s",
+      "ICP: %d pts, %d iters, overlap=%.0f%%, mean_err=%.4f m, time=%.2f ms%s",
       static_cast<int>(current_points.size()),
       result.iterations,
+      result.overlap_ratio * 100.0,
       result.mean_error,
       icp_ms,
       icp_ms > 10.0 ? "  <-- SLOW" : "");

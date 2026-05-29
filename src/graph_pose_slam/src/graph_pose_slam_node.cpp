@@ -92,6 +92,11 @@ private:
       1e-9,
       declare_parameter<double>(
         "icp_convergence_rotation", slam_params_.icp_convergence_rotation));
+
+    slam_params_.icp_overlap_dist = std::max(
+      1e-3,
+      declare_parameter<double>(
+        "icp_overlap_dist", slam_params_.icp_overlap_dist));
   }
 
   // ---------------------------------------------------------------------------
