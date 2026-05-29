@@ -1,0 +1,5 @@
+graph_pose_slam_node:
+  ros__parameters:
+    # Minimum motion since the last keyframe required to accept a new one.
+    min_translation_for_keyframe: 0.10   # metres
+    min_rotation_for_keyframe: 0.08      # radians

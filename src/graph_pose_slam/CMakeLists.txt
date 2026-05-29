@@ -18,6 +18,7 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
+# Core SLAM library (no ROS node, easy to unit test)
 add_library(graph_pose_slam_core
   src/graph_pose_slam.cpp
 )
@@ -28,12 +29,13 @@ target_include_directories(graph_pose_slam_core PUBLIC
 
 ament_target_dependencies(graph_pose_slam_core
   builtin_interfaces
-  nav_msgs
   sensor_msgs
 )
 
+# ROS node (subscribes to /odom and /scan, runs the SLAM core)
 add_executable(graph_pose_slam_node
   src/graph_pose_slam_node.cpp
+  src/utils.cpp
 )
 
 target_include_directories(graph_pose_slam_node PUBLIC
@@ -41,6 +43,7 @@ target_include_directories(graph_pose_slam_node PUBLIC
 )
 
 ament_target_dependencies(graph_pose_slam_node
+  builtin_interfaces
   nav_msgs
   rclcpp
   sensor_msgs
@@ -59,6 +62,12 @@ install(TARGETS
 install(DIRECTORY
   include/
   DESTINATION include
+)
+
+install(DIRECTORY
+  config
+  launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_package()
