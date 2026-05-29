@@ -3,7 +3,8 @@
 #include <deque>
 
 #include "builtin_interfaces/msg/time.hpp"
-#include "graph_pose_slam/graph_pose_slam.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
+#include "graph_pose_slam/types.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -19,6 +20,9 @@ struct OdomSample
 
 // Extracts a 2-D pose (x, y, yaw) from a ROS Odometry message.
 Pose2D odometryToPose2D(const nav_msgs::msg::Odometry & msg);
+
+// Converts a yaw angle (radians) to a ROS quaternion (pure z-rotation).
+geometry_msgs::msg::Quaternion yawToQuaternion(double yaw);
 
 // Drops samples older than 5 seconds relative to newest_stamp.
 void pruneOdomBuffer(std::deque<OdomSample> & buffer, const rclcpp::Time & newest_stamp);

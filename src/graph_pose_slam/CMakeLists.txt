@@ -7,6 +7,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -21,6 +22,7 @@ endif()
 # Core SLAM library (no ROS node, easy to unit test)
 add_library(graph_pose_slam_core
   src/graph_pose_slam.cpp
+  src/scan_matcher.cpp
 )
 
 target_include_directories(graph_pose_slam_core PUBLIC
@@ -44,6 +46,7 @@ target_include_directories(graph_pose_slam_node PUBLIC
 
 ament_target_dependencies(graph_pose_slam_node
   builtin_interfaces
+  geometry_msgs
   nav_msgs
   rclcpp
   sensor_msgs

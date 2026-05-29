@@ -3,3 +3,9 @@ graph_pose_slam_node:
     # Minimum motion since the last keyframe required to accept a new one.
     min_translation_for_keyframe: 0.10   # metres
     min_rotation_for_keyframe: 0.08      # radians
+
+    # ICP scan matching
+    icp_max_iterations: 30
+    icp_max_correspondence_dist: 0.2     # metres — reject pairs farther than this
+    icp_convergence_translation: 0.0001  # metres — stop when delta falls below this
+    icp_convergence_rotation: 0.0001     # radians

@@ -77,4 +77,17 @@ bool lookupOdomAtStamp(
   return false;
 }
 
+geometry_msgs::msg::Quaternion yawToQuaternion(double yaw)
+{
+  // A pure yaw rotation has no roll or pitch, so x=0, y=0.
+  // The quaternion half-angle formulas reduce to:
+  //   w = cos(yaw/2),  z = sin(yaw/2)
+  geometry_msgs::msg::Quaternion q;
+  q.w = std::cos(yaw * 0.5);
+  q.x = 0.0;
+  q.y = 0.0;
+  q.z = std::sin(yaw * 0.5);
+  return q;
+}
+
 }  // namespace graph_pose_slam
