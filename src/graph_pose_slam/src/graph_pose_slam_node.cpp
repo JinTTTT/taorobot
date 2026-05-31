@@ -52,13 +52,16 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "graph_pose_slam_node started\n"
-      "  keyframe:  translation=%.2f m  rotation=%.2f rad\n"
-      "  CSM:       min_score=%.2f  xy_step=%.3f m  theta_step=%.3f rad",
+      "  keyframe:  translation=%.2f m (translation-only)\n"
+      "  CSM:       min_score=%.2f  xy_step=%.3f m  theta_step=%.3f rad\n"
+      "  LC:        radius=%.2f m  skip=%d  min_score=%.2f",
       slam_params_.min_translation_for_keyframe,
-      slam_params_.min_rotation_for_keyframe,
       slam_params_.csm_min_score,
       slam_params_.csm_search_xy_step,
-      slam_params_.csm_search_theta_step);
+      slam_params_.csm_search_theta_step,
+      slam_params_.lc_search_radius,
+      slam_params_.lc_min_skip,
+      slam_params_.lc_min_score);
   }
 
 private:
@@ -72,11 +75,6 @@ private:
       0.0,
       declare_parameter<double>(
         "min_translation_for_keyframe", slam_params_.min_translation_for_keyframe));
-
-    slam_params_.min_rotation_for_keyframe = std::max(
-      0.0,
-      declare_parameter<double>(
-        "min_rotation_for_keyframe", slam_params_.min_rotation_for_keyframe));
 
     slam_params_.csm_likelihood_max_dist = std::max(
       0.05,
@@ -112,6 +110,32 @@ private:
       0.0,
       declare_parameter<double>(
         "csm_min_score", slam_params_.csm_min_score));
+
+    slam_params_.lc_search_radius = std::max(
+      0.1,
+      declare_parameter<double>(
+        "lc_search_radius", slam_params_.lc_search_radius));
+
+    slam_params_.lc_min_skip = std::max(
+      1,
+      static_cast<int>(
+        declare_parameter<int>(
+          "lc_min_skip", slam_params_.lc_min_skip)));
+
+    slam_params_.lc_csm_search_xy_range = std::max(
+      0.01,
+      declare_parameter<double>(
+        "lc_csm_search_xy_range", slam_params_.lc_csm_search_xy_range));
+
+    slam_params_.lc_csm_search_theta_range = std::max(
+      0.01,
+      declare_parameter<double>(
+        "lc_csm_search_theta_range", slam_params_.lc_csm_search_theta_range));
+
+    slam_params_.lc_min_score = std::max(
+      0.0,
+      declare_parameter<double>(
+        "lc_min_score", slam_params_.lc_min_score));
 
   }
 

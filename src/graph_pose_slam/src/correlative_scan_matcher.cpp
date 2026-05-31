@@ -90,11 +90,14 @@ CorrelativeScanMatcher::LikelihoodField CorrelativeScanMatcher::buildLikelihoodF
   }
 
   // Convert cell distance → linear likelihood value [0, 1].
+  // Clamped to [0, 1]: when likelihood_max_dist < grid_resolution the formula
+  // would go negative for adjacent cells — clamp makes it binary (on-wall=1, else=0).
   field.data.assign(N, 0.0f);
   for (int i = 0; i < N; ++i) {
     if (dist[i] > max_dist_cells) {continue;}
-    double d = dist[i] * options_.grid_resolution;
-    field.data[i] = static_cast<float>(1.0 - d / options_.likelihood_max_dist);
+    const double d = dist[i] * options_.grid_resolution;
+    field.data[i] = static_cast<float>(
+      std::max(0.0, 1.0 - d / options_.likelihood_max_dist));
   }
 
   return field;

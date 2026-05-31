@@ -1,5 +1,7 @@
 #pragma once
 
+#include <set>
+#include <utility>
 #include <vector>
 
 #include "graph_pose_slam/correlative_scan_matcher.hpp"
@@ -12,18 +14,29 @@ namespace graph_pose_slam
 
 struct GraphPoseSlamParameters
 {
-  // Keyframe selection — how far the robot must move before we accept a new keyframe.
+  // Keyframe selection — only translation triggers a new keyframe.
+  // Rotation-only keyframes are skipped: a 360° lidar scan looks identical from the
+  // same position regardless of heading, making them useless (and dangerous for LC).
   double min_translation_for_keyframe{0.40};   // metres
-  double min_rotation_for_keyframe{0.20};       // radians
 
-  // Correlative scan matching
-  double csm_likelihood_max_dist{0.50};   // distance transform extent (metres)
+  // Correlative scan matching — same likelihood field for both sequential and loop closure.
+  // Smaller = stricter: a scan point must land within this distance of a wall to score > 0.
+  // Minimum meaningful value = grid_resolution (0.05 m); below that the linear formula
+  // clamps to binary (on-wall = 1.0, everything else = 0.0).
+  double csm_likelihood_max_dist{0.10};   // metres — applies to both sequential and LC
   double csm_search_xy_range{0.20};       // search ±20 cm around odom guess
   double csm_search_xy_step{0.02};        // 2 cm step size
   double csm_search_theta_range{0.30};    // search ±~17 degrees
   double csm_search_theta_step{0.02};     // ~1 degree step size
   std::size_t csm_beam_step{5};           // use every 5th beam when scoring
   double csm_min_score{0.95};             // reject match if score below this
+
+  // Loop closure detection
+  double lc_search_radius{2.0};            // only check old nodes within this distance (metres)
+  int lc_min_skip{5};                      // skip this many recent neighbors (they are sequential, not loops)
+  double lc_csm_search_xy_range{0.50};     // wider than sequential — drift may have offset the guess
+  double lc_csm_search_theta_range{0.50};  // ~29 degrees
+  double lc_min_score{0.85};               // confirmation threshold for loop closure
 };
 
 class GraphPoseSlam
@@ -56,8 +69,13 @@ private:
     const Pose2D & odom_at_b) const;
 
   GraphPoseSlamParameters params_{};
-  CorrelativeScanMatcher scan_matcher_{};
+  CorrelativeScanMatcher scan_matcher_{};    // sequential keyframe matching
+  CorrelativeScanMatcher lc_scan_matcher_{}; // loop closure (wider search window, same likelihood field)
   PoseGraph graph_{};
+
+  // Every confirmed loop closure pair is stored here so the same (from, to) pair
+  // is never checked again — prevents flooding the graph with redundant LC edges.
+  std::set<std::pair<int, int>> confirmed_lc_pairs_{};
 
   std::vector<Point2D> prev_keyframe_points_{};
   Pose2D prev_keyframe_odom_{};

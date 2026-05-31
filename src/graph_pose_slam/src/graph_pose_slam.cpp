@@ -21,6 +21,18 @@ void GraphPoseSlam::configure(const GraphPoseSlamParameters & params)
   csm_options.beam_step            = params_.csm_beam_step;
   csm_options.min_score            = params_.csm_min_score;
   scan_matcher_.configure(csm_options);
+
+  // Loop closure matcher: wider search window because drift may offset the initial guess.
+  // Same likelihood field as sequential — one shared strict parameter for both.
+  CorrelativeMatchOptions lc_options;
+  lc_options.likelihood_max_dist  = params_.csm_likelihood_max_dist;
+  lc_options.search_xy_range      = params_.lc_csm_search_xy_range;
+  lc_options.search_xy_step       = params_.csm_search_xy_step;
+  lc_options.search_theta_range   = params_.lc_csm_search_theta_range;
+  lc_options.search_theta_step    = params_.csm_search_theta_step;
+  lc_options.beam_step            = params_.csm_beam_step;
+  lc_options.min_score            = params_.lc_min_score;
+  lc_scan_matcher_.configure(lc_options);
 }
 
 bool GraphPoseSlam::shouldAcceptKeyframe(
@@ -29,12 +41,7 @@ bool GraphPoseSlam::shouldAcceptKeyframe(
 {
   const double dx = current_odom.x - last_keyframe_odom.x;
   const double dy = current_odom.y - last_keyframe_odom.y;
-  const double translation = std::hypot(dx, dy);
-  const double rotation =
-    std::abs(normalizeAngle(current_odom.theta - last_keyframe_odom.theta));
-
-  return translation >= params_.min_translation_for_keyframe ||
-         rotation >= params_.min_rotation_for_keyframe;
+  return std::hypot(dx, dy) >= params_.min_translation_for_keyframe;
 }
 
 ScanMatchResult GraphPoseSlam::addKeyframe(
@@ -49,33 +56,17 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
     // Use the odom delta as the initial guess.
     // The correlative matcher then searches a small window around it.
     const Pose2D odom_delta = computeOdomDelta(prev_keyframe_odom_, odom_pose);
-    const double delta_translation = std::hypot(odom_delta.x, odom_delta.y);
 
     const auto t0 = std::chrono::steady_clock::now();
-
-    if (delta_translation < params_.min_translation_for_keyframe) {
-      // Rotation-triggered keyframe: fix (x, y) to odom and search only theta.
-      // Full 3D search creates false peaks in symmetric environments when translation is small.
-      result = scan_matcher_.matchRotationOnly(prev_keyframe_points_, current_points, odom_delta);
-      const double ms =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-      RCLCPP_INFO(
-        rclcpp::get_logger("graph_pose_slam"),
-        "CSM-rot: score=%.3f, %s, time=%.2f ms",
-        result.score,
-        result.matched ? "MATCHED" : "no match (using odom)",
-        ms);
-    } else {
-      result = scan_matcher_.match(prev_keyframe_points_, current_points, odom_delta);
-      const double ms =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-      RCLCPP_INFO(
-        rclcpp::get_logger("graph_pose_slam"),
-        "CSM: score=%.3f, %s, time=%.2f ms",
-        result.score,
-        result.matched ? "MATCHED" : "no match (using odom)",
-        ms);
-    }
+    result = scan_matcher_.match(prev_keyframe_points_, current_points, odom_delta);
+    const double ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    RCLCPP_INFO(
+      rclcpp::get_logger("graph_pose_slam"),
+      "CSM: score=%.3f, %s, time=%.2f ms",
+      result.score,
+      result.matched ? "MATCHED" : "no match (using odom)",
+      ms);
 
     // Compose the result into the running world pose estimate.
     const double cos_prev = std::cos(estimated_pose_.theta);
@@ -101,9 +92,60 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
       graph_.addEdge(prev_id, new_id, result.transform, scan_match_information, EdgeType::SCAN_MATCH);
     }
 
-    // TODO (Option 2): check for loop closures against older keyframes.
+    // Loop closure detection: scan all old nodes (skip lc_min_skip recent neighbors),
+    // run CSM against each spatial candidate, then add only the single best-scoring
+    // match as an LC edge. One edge per keyframe keeps the graph clean.
+    if (new_id > params_.lc_min_skip) {
+      int    best_cid    = -1;
+      double best_score  = -1.0;
+      double best_dist   = 0.0;
+      Pose2D best_transform{};
+
+      for (int cid = 0; cid < new_id - params_.lc_min_skip; ++cid) {
+        if (confirmed_lc_pairs_.count({cid, new_id})) {
+          continue;
+        }
+
+        const PoseNode & candidate = graph_.getNode(cid);
+
+        // Stage 1: cheap spatial filter.
+        const double dist = std::hypot(
+          estimated_pose_.x - candidate.pose.x,
+          estimated_pose_.y - candidate.pose.y);
+        if (dist > params_.lc_search_radius) {
+          continue;
+        }
+
+        // Stage 2: CSM with wider search window to account for accumulated drift.
+        const Pose2D lc_guess = computeOdomDelta(candidate.pose, estimated_pose_);
+        const ScanMatchResult lc_result =
+          lc_scan_matcher_.match(candidate.points, current_points, lc_guess);
+
+        if (lc_result.matched && lc_result.score > best_score) {
+          best_cid       = cid;
+          best_score     = lc_result.score;
+          best_dist      = dist;
+          best_transform = lc_result.transform;
+        }
+      }
+
+      // Add only the best candidate found this keyframe.
+      if (best_cid >= 0) {
+        confirmed_lc_pairs_.insert({best_cid, new_id});
+        graph_.addEdge(best_cid, new_id, best_transform,
+          best_score * 20.0, EdgeType::LOOP_CLOSURE);
+        RCLCPP_INFO(
+          rclcpp::get_logger("graph_pose_slam"),
+          "Loop closure: node %d → %d  score=%.3f  dist=%.2f m",
+          best_cid, new_id, best_score, best_dist);
+      }
+    }
   } else {
-    // First keyframe: origin of the world frame, pose = (0, 0, 0).
+    // First keyframe: anchor the SLAM world frame to the odom frame.
+    // Using the full odom pose (not a hardcoded (0,0)) means the SLAM path and
+    // odom path start at exactly the same point in RViz, so any later divergence
+    // is a real and visible correction, not just a coordinate-frame offset.
+    estimated_pose_ = odom_pose;
     graph_.addNode(estimated_pose_, odom_pose, current_points);
   }
 
