@@ -6,16 +6,18 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(yaml_cpp_vendor REQUIRED)
 
 # Core SLAM library (no ROS node, easy to unit test)
 add_library(graph_pose_slam_core
   src/graph_pose_slam.cpp
-  src/icp_scan_matcher.cpp
+  src/correlative_scan_matcher.cpp
 )
 
 target_include_directories(graph_pose_slam_core PUBLIC
@@ -50,25 +52,48 @@ target_link_libraries(graph_pose_slam_node
   graph_pose_slam_core
 )
 
-# Standalone ICP test script — run with: ros2 run graph_pose_slam test_icp_scan_matcher
-add_executable(test_icp_scan_matcher
-  test/test_icp_scan_matcher.cpp
+# Standalone CSM test script — run with: ros2 run graph_pose_slam test_correlative_scan_matcher
+add_executable(test_correlative_scan_matcher
+  test/test_correlative_scan_matcher.cpp
 )
 
-target_include_directories(test_icp_scan_matcher PUBLIC
+target_include_directories(test_correlative_scan_matcher PUBLIC
   include
 )
 
-ament_target_dependencies(test_icp_scan_matcher sensor_msgs)
+ament_target_dependencies(test_correlative_scan_matcher
+  ament_index_cpp
+  sensor_msgs
+)
 
-target_link_libraries(test_icp_scan_matcher
+target_link_libraries(test_correlative_scan_matcher
   graph_pose_slam_core
+  yaml-cpp
+)
+
+# ICP vs CSM comparison — compiles icp_scan_matcher.cpp directly (not in core lib)
+add_executable(test_matcher_comparison
+  test/test_matcher_comparison.cpp
+  src/icp_scan_matcher.cpp
+)
+
+target_include_directories(test_matcher_comparison PUBLIC include)
+
+ament_target_dependencies(test_matcher_comparison
+  ament_index_cpp
+  sensor_msgs
+)
+
+target_link_libraries(test_matcher_comparison
+  graph_pose_slam_core
+  yaml-cpp
 )
 
 install(TARGETS
   graph_pose_slam_core
   graph_pose_slam_node
-  test_icp_scan_matcher
+  test_correlative_scan_matcher
+  test_matcher_comparison
   DESTINATION lib/${PROJECT_NAME}
 )
 

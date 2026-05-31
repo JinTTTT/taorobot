@@ -9,13 +9,6 @@
 namespace graph_pose_slam
 {
 
-// A single 2D lidar hit point in the sensor's local frame.
-struct Point2D
-{
-  double x{0.0};
-  double y{0.0};
-};
-
 struct IcpResult
 {
   Pose2D transform{};         // refined transform: from scan_b frame into scan_a frame

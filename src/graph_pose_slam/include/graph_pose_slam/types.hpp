@@ -12,6 +12,13 @@ struct Pose2D
   double theta{0.0};
 };
 
+// A single 2D lidar hit point in the sensor's local frame.
+struct Point2D
+{
+  double x{0.0};
+  double y{0.0};
+};
+
 // Wraps angle into [-pi, pi] so motion deltas take the shortest path.
 inline double normalizeAngle(double angle)
 {

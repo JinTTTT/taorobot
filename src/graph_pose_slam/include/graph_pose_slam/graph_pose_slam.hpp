@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "graph_pose_slam/icp_scan_matcher.hpp"
+#include "graph_pose_slam/correlative_scan_matcher.hpp"
 #include "graph_pose_slam/types.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 
@@ -15,12 +15,14 @@ struct GraphPoseSlamParameters
   double min_translation_for_keyframe{0.10};   // metres
   double min_rotation_for_keyframe{0.08};       // radians
 
-  // ICP scan matching
-  int icp_max_iterations{30};
-  double icp_max_correspondence_dist{0.2};      // metres
-  double icp_convergence_translation{1e-4};     // metres
-  double icp_convergence_rotation{1e-4};        // radians
-  double icp_overlap_dist{0.02};                // metres — strict threshold for overlap reporting only
+  // Correlative scan matching
+  double csm_likelihood_max_dist{0.50};   // distance transform extent (metres)
+  double csm_search_xy_range{0.20};       // search ±20 cm around odom guess
+  double csm_search_xy_step{0.02};        // 2 cm step size
+  double csm_search_theta_range{0.15};    // search ±~9 degrees
+  double csm_search_theta_step{0.02};     // ~1 degree step size
+  std::size_t csm_beam_step{5};           // use every 5th beam when scoring
+  double csm_min_score{0.20};             // reject match if score below this
 };
 
 class GraphPoseSlam
@@ -35,14 +37,14 @@ public:
 
   // Adds a new keyframe.
   // On the first call: stores the scan as the reference for the next match.
-  // On subsequent calls: runs ICP against the previous keyframe's scan
-  //   using the odom delta as the initial guess, then stores the result.
+  // On subsequent calls: runs correlative scan matching against the previous
+  //   keyframe's scan using the odom delta as the initial guess.
   // TODO: insert node + edges into the pose graph, run loop-closure check.
-  IcpResult addKeyframe(
+  ScanMatchResult addKeyframe(
     const Pose2D & odom_pose,
     const sensor_msgs::msg::LaserScan & scan);
 
-  // Returns the pose estimate built by composing ICP results.
+  // Returns the pose estimate built by composing scan match results.
   // Starts at (0, 0, 0) and grows with each accepted keyframe.
   // TODO: replace with the graph-optimized pose once the pose graph is built.
   Pose2D estimatedPose() const;
@@ -50,18 +52,16 @@ public:
   bool hasKeyframes() const;
 
 private:
-  // Computes the transform from scan B's frame into scan A's frame
-  // using the two absolute odometry poses.
   Pose2D computeOdomDelta(
     const Pose2D & odom_at_a,
     const Pose2D & odom_at_b) const;
 
   GraphPoseSlamParameters params_{};
-  ScanMatcher scan_matcher_{};
+  CorrelativeScanMatcher scan_matcher_{};
 
   std::vector<Point2D> prev_keyframe_points_{};
   Pose2D prev_keyframe_odom_{};
-  Pose2D icp_estimated_pose_{};   // world pose built by composing ICP results
+  Pose2D estimated_pose_{};
   bool has_keyframes_{false};
 };
 

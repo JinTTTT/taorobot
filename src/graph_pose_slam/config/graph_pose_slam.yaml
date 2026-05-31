@@ -2,13 +2,13 @@ graph_pose_slam_node:
   ros__parameters:
     # Minimum motion since the last keyframe required to accept a new one.
     min_translation_for_keyframe: 0.10   # metres
-    min_rotation_for_keyframe: 0.08      # radians
+    min_rotation_for_keyframe: 0.08      # radians (~4.5 degrees)
 
-    # ICP scan matching
-    icp_max_iterations: 30
-    icp_max_correspondence_dist: 0.2     # metres — reject pairs farther than this during matching
-    icp_convergence_translation: 0.0001  # metres — stop when delta falls below this
-    icp_convergence_rotation: 0.0001     # radians
-    icp_overlap_dist: 0.02               # metres — a point counts as overlapping only if its
-                                         #   nearest neighbour is closer than this after alignment.
-                                         #   set to ~2x lidar noise stddev (lidar stddev = 0.01 m)
+    # Correlative scan matching
+    csm_likelihood_max_dist: 0.50        # metres — distance transform spread from each wall point
+    csm_search_xy_range: 0.20            # search ±20 cm around odom guess
+    csm_search_xy_step: 0.01             # 1 cm steps → 40 candidates in x and y
+    csm_search_theta_range: 0.3         # search ±~17 degrees
+    csm_search_theta_step: 0.02          # ~1 degree steps → 16 candidates
+    csm_beam_step: 5                     # use every 5th beam when scoring
+    csm_min_score: 0.20                  # score below this → fall back to odometry

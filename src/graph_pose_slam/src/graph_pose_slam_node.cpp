@@ -73,30 +73,40 @@ private:
       declare_parameter<double>(
         "min_rotation_for_keyframe", slam_params_.min_rotation_for_keyframe));
 
-    slam_params_.icp_max_iterations = std::max(
-      1,
-      static_cast<int>(
-        declare_parameter<int>("icp_max_iterations", slam_params_.icp_max_iterations)));
+    slam_params_.csm_likelihood_max_dist = std::max(
+      0.05,
+      declare_parameter<double>(
+        "csm_likelihood_max_dist", slam_params_.csm_likelihood_max_dist));
 
-    slam_params_.icp_max_correspondence_dist = std::max(
+    slam_params_.csm_search_xy_range = std::max(
       0.01,
       declare_parameter<double>(
-        "icp_max_correspondence_dist", slam_params_.icp_max_correspondence_dist));
+        "csm_search_xy_range", slam_params_.csm_search_xy_range));
 
-    slam_params_.icp_convergence_translation = std::max(
-      1e-9,
+    slam_params_.csm_search_xy_step = std::max(
+      0.005,
       declare_parameter<double>(
-        "icp_convergence_translation", slam_params_.icp_convergence_translation));
+        "csm_search_xy_step", slam_params_.csm_search_xy_step));
 
-    slam_params_.icp_convergence_rotation = std::max(
-      1e-9,
+    slam_params_.csm_search_theta_range = std::max(
+      0.01,
       declare_parameter<double>(
-        "icp_convergence_rotation", slam_params_.icp_convergence_rotation));
+        "csm_search_theta_range", slam_params_.csm_search_theta_range));
 
-    slam_params_.icp_overlap_dist = std::max(
-      1e-3,
+    slam_params_.csm_search_theta_step = std::max(
+      0.005,
       declare_parameter<double>(
-        "icp_overlap_dist", slam_params_.icp_overlap_dist));
+        "csm_search_theta_step", slam_params_.csm_search_theta_step));
+
+    slam_params_.csm_beam_step = static_cast<std::size_t>(std::max(
+        1,
+        static_cast<int>(
+          declare_parameter<int>("csm_beam_step", static_cast<int>(slam_params_.csm_beam_step)))));
+
+    slam_params_.csm_min_score = std::max(
+      0.0,
+      declare_parameter<double>(
+        "csm_min_score", slam_params_.csm_min_score));
   }
 
   // ---------------------------------------------------------------------------
@@ -137,16 +147,11 @@ private:
     const auto result = slam_.addKeyframe(scan_odom_pose, *msg);
     last_keyframe_odom_pose_ = scan_odom_pose;
 
-    if (result.iterations > 0 && !result.converged) {
+    if (!result.matched) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
-        "ICP did not converge after %d iterations (mean error: %.4f m).",
-        result.iterations, result.mean_error);
-    } else if (result.converged) {
-      RCLCPP_INFO_THROTTLE(
-        get_logger(), *get_clock(), 2000,
-        "ICP converged in %d iterations, mean error: %.4f m.",
-        result.iterations, result.mean_error);
+        "CSM score too low (%.3f) — falling back to odometry for this keyframe.",
+        result.score);
     }
 
     publishPaths(scan_odom_pose, msg->header.stamp);
