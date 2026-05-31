@@ -189,4 +189,46 @@ ScanMatchResult CorrelativeScanMatcher::match(
   return result;
 }
 
+ScanMatchResult CorrelativeScanMatcher::matchRotationOnly(
+  const std::vector<Point2D> & points_a,
+  const std::vector<Point2D> & points_b,
+  const Pose2D & odom_delta) const
+{
+  ScanMatchResult result;
+  result.transform = odom_delta;
+
+  if (points_a.empty() || points_b.empty()) {
+    return result;
+  }
+
+  const LikelihoodField field = buildLikelihoodField(points_a);
+
+  double best_score = -1.0;
+  Pose2D best_transform = odom_delta;
+
+  // x and y are fixed to odom — odom is reliable for translation over short intervals.
+  // Only theta is searched, reducing the problem from 3D to 1D.
+  for (double dtheta = -options_.search_theta_range;
+    dtheta <= options_.search_theta_range + 1e-9;
+    dtheta += options_.search_theta_step)
+  {
+    Pose2D candidate{
+      odom_delta.x,
+      odom_delta.y,
+      normalizeAngle(odom_delta.theta + dtheta)
+    };
+
+    const double score = scoreAtPose(points_b, candidate, field);
+    if (score > best_score) {
+      best_score = score;
+      best_transform = candidate;
+    }
+  }
+
+  result.transform = best_transform;
+  result.score     = best_score;
+  result.matched   = best_score >= options_.min_score;
+  return result;
+}
+
 }  // namespace graph_pose_slam

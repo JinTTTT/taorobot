@@ -1,14 +1,20 @@
 graph_pose_slam_node:
   ros__parameters:
     # Minimum motion since the last keyframe required to accept a new one.
-    min_translation_for_keyframe: 0.10   # metres
-    min_rotation_for_keyframe: 0.08      # radians (~4.5 degrees)
+    # Larger spacing → the fixed CSM grid quantization error (1 cm / 1°) becomes
+    # a smaller fraction of the total motion → less accumulated zig-zag.
+    # Tested in simulation: 0.40 m gave visibly smoother path than 0.10 m.
+    min_translation_for_keyframe: 0.40   # metres
+    min_rotation_for_keyframe: 0.20      # radians (~11 degrees)
 
     # Correlative scan matching
     csm_likelihood_max_dist: 0.50        # metres — distance transform spread from each wall point
     csm_search_xy_range: 0.20            # search ±20 cm around odom guess
     csm_search_xy_step: 0.01             # 1 cm steps → 40 candidates in x and y
-    csm_search_theta_range: 0.3         # search ±~17 degrees
-    csm_search_theta_step: 0.02          # ~1 degree steps → 16 candidates
+    csm_search_theta_range: 0.3          # search ±~17 degrees
+    csm_search_theta_step: 0.01          # ~1 degree steps → 16 candidates
     csm_beam_step: 5                     # use every 5th beam when scoring
-    csm_min_score: 0.20                  # score below this → fall back to odometry
+    # Consecutive keyframe scores in simulation are 0.88–0.97; 0.50 filters genuinely
+    # bad matches without being so strict that it rejects loop closure candidates,
+    # which may score slightly lower due to accumulated odom drift in the initial guess.
+    csm_min_score: 0.8                  # score below this → fall back to odometry

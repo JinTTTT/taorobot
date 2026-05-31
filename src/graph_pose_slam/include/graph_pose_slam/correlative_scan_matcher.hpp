@@ -40,12 +40,21 @@ public:
   // Convert a raw laser scan into a vector of 2D hit points (sensor-local frame).
   std::vector<Point2D> extractPoints(const sensor_msgs::msg::LaserScan & scan) const;
 
-  // Find the transform that best aligns points_b into points_a's frame.
-  // initial_guess comes from odometry and pre-centers the search window.
+  // Full 3-DOF search: tries all (dx, dy, dtheta) combinations around initial_guess.
+  // Use this when the robot has translated meaningfully between keyframes.
   ScanMatchResult match(
     const std::vector<Point2D> & points_a,
     const std::vector<Point2D> & points_b,
     const Pose2D & initial_guess) const;
+
+  // Rotation-only search: fixes (x, y) from odom and searches only theta.
+  // Use when the robot rotated in place with little translation.
+  // Reduces the search from 3D to 1D, eliminating false (x,y) peaks that
+  // make the full search unreliable for pure-rotation keyframes.
+  ScanMatchResult matchRotationOnly(
+    const std::vector<Point2D> & points_a,
+    const std::vector<Point2D> & points_b,
+    const Pose2D & odom_delta) const;
 
 private:
   // A 2D grid where each cell stores how close it is to the nearest scan-A point.

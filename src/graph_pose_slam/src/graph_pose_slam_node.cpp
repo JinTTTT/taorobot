@@ -42,18 +42,23 @@ public:
       rclcpp::SensorDataQoS(),
       std::bind(&GraphPoseSlamNode::scanCallback, this, std::placeholders::_1));
 
-    icp_path_pub_ = create_publisher<nav_msgs::msg::Path>("/icp_path", 10);
+    slam_path_pub_ = create_publisher<nav_msgs::msg::Path>("/slam_path", 10);
     odom_path_pub_ = create_publisher<nav_msgs::msg::Path>("/odom_path", 10);
 
     // Both paths are published in the odom frame so RViz can overlay them directly.
-    icp_path_.header.frame_id = "odom";
+    slam_path_.header.frame_id = "odom";
     odom_path_.header.frame_id = "odom";
 
     RCLCPP_INFO(
       get_logger(),
-      "graph_pose_slam_node started (keyframe thresholds: %.2f m, %.2f rad).",
+      "graph_pose_slam_node started\n"
+      "  keyframe:  translation=%.2f m  rotation=%.2f rad\n"
+      "  CSM:       min_score=%.2f  xy_step=%.3f m  theta_step=%.3f rad",
       slam_params_.min_translation_for_keyframe,
-      slam_params_.min_rotation_for_keyframe);
+      slam_params_.min_rotation_for_keyframe,
+      slam_params_.csm_min_score,
+      slam_params_.csm_search_xy_step,
+      slam_params_.csm_search_theta_step);
   }
 
 private:
@@ -107,6 +112,7 @@ private:
       0.0,
       declare_parameter<double>(
         "csm_min_score", slam_params_.csm_min_score));
+
   }
 
   // ---------------------------------------------------------------------------
@@ -144,16 +150,8 @@ private:
       return;
     }
 
-    const auto result = slam_.addKeyframe(scan_odom_pose, *msg);
+    slam_.addKeyframe(scan_odom_pose, *msg);
     last_keyframe_odom_pose_ = scan_odom_pose;
-
-    if (!result.matched) {
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 2000,
-        "CSM score too low (%.3f) — falling back to odometry for this keyframe.",
-        result.score);
-    }
-
     publishPaths(scan_odom_pose, msg->header.stamp);
   }
 
@@ -176,17 +174,16 @@ private:
     odom_path_.header.stamp = stamp;
     odom_path_pub_->publish(odom_path_);
 
-    // Append the ICP-accumulated pose to the ICP path.
-    const Pose2D icp_pose = slam_.estimatedPose();
-    geometry_msgs::msg::PoseStamped icp_stamped;
-    icp_stamped.header.stamp = stamp;
-    icp_stamped.header.frame_id = "odom";
-    icp_stamped.pose.position.x = icp_pose.x;
-    icp_stamped.pose.position.y = icp_pose.y;
-    icp_stamped.pose.orientation = yawToQuaternion(icp_pose.theta);
-    icp_path_.poses.push_back(icp_stamped);
-    icp_path_.header.stamp = stamp;
-    icp_path_pub_->publish(icp_path_);
+    const Pose2D slam_pose = slam_.estimatedPose();
+    geometry_msgs::msg::PoseStamped slam_stamped;
+    slam_stamped.header.stamp = stamp;
+    slam_stamped.header.frame_id = "odom";
+    slam_stamped.pose.position.x = slam_pose.x;
+    slam_stamped.pose.position.y = slam_pose.y;
+    slam_stamped.pose.orientation = yawToQuaternion(slam_pose.theta);
+    slam_path_.poses.push_back(slam_stamped);
+    slam_path_.header.stamp = stamp;
+    slam_path_pub_->publish(slam_path_);
   }
 
   // ---------------------------------------------------------------------------
@@ -200,12 +197,12 @@ private:
   Pose2D last_keyframe_odom_pose_{};
   bool have_first_odom_{false};
 
-  nav_msgs::msg::Path icp_path_{};
+  nav_msgs::msg::Path slam_path_{};
   nav_msgs::msg::Path odom_path_{};
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr icp_path_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr slam_path_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr odom_path_pub_;
 };
 

@@ -18,6 +18,7 @@ find_package(yaml_cpp_vendor REQUIRED)
 add_library(graph_pose_slam_core
   src/graph_pose_slam.cpp
   src/correlative_scan_matcher.cpp
+  src/pose_graph.cpp
 )
 
 target_include_directories(graph_pose_slam_core PUBLIC

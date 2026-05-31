@@ -49,20 +49,33 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
     // Use the odom delta as the initial guess.
     // The correlative matcher then searches a small window around it.
     const Pose2D odom_delta = computeOdomDelta(prev_keyframe_odom_, odom_pose);
+    const double delta_translation = std::hypot(odom_delta.x, odom_delta.y);
 
     const auto t0 = std::chrono::steady_clock::now();
-    result = scan_matcher_.match(prev_keyframe_points_, current_points, odom_delta);
-    const double ms =
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
-    RCLCPP_INFO(
-      rclcpp::get_logger("graph_pose_slam"),
-      "CSM: %d pts, score=%.3f, %s, time=%.2f ms%s",
-      static_cast<int>(current_points.size()),
-      result.score,
-      result.matched ? "MATCHED" : "no match (using odom)",
-      ms,
-      ms > 20.0 ? "  <-- SLOW" : "");
+    if (delta_translation < params_.min_translation_for_keyframe) {
+      // Rotation-triggered keyframe: fix (x, y) to odom and search only theta.
+      // Full 3D search creates false peaks in symmetric environments when translation is small.
+      result = scan_matcher_.matchRotationOnly(prev_keyframe_points_, current_points, odom_delta);
+      const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+      RCLCPP_INFO(
+        rclcpp::get_logger("graph_pose_slam"),
+        "CSM-rot: score=%.3f, %s, time=%.2f ms",
+        result.score,
+        result.matched ? "MATCHED" : "no match (using odom)",
+        ms);
+    } else {
+      result = scan_matcher_.match(prev_keyframe_points_, current_points, odom_delta);
+      const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+      RCLCPP_INFO(
+        rclcpp::get_logger("graph_pose_slam"),
+        "CSM: score=%.3f, %s, time=%.2f ms",
+        result.score,
+        result.matched ? "MATCHED" : "no match (using odom)",
+        ms);
+    }
 
     // Compose the result into the running world pose estimate.
     const double cos_prev = std::cos(estimated_pose_.theta);
@@ -73,9 +86,25 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
       normalizeAngle(estimated_pose_.theta + result.transform.theta)
     };
 
-    // TODO: insert node into pose graph.
-    // TODO: add odom edge (odom_delta) and scan-match edge (result.transform).
-    // TODO: check for loop closures against older keyframes.
+    // Insert the new keyframe into the pose graph.
+    const int new_id = graph_.addNode(estimated_pose_, odom_pose, current_points);
+    const int prev_id = new_id - 1;
+
+    // Odometry edge: always added — cheap but drifts.
+    graph_.addEdge(prev_id, new_id, odom_delta, 1.0, EdgeType::ODOM);
+
+    // Scan-match edge: added only when CSM succeeded — more accurate than odom.
+    // Information weight is proportional to the match score so a high-confidence
+    // match is trusted more than a borderline one.
+    if (result.matched) {
+      const double scan_match_information = result.score * 10.0;
+      graph_.addEdge(prev_id, new_id, result.transform, scan_match_information, EdgeType::SCAN_MATCH);
+    }
+
+    // TODO (Option 2): check for loop closures against older keyframes.
+  } else {
+    // First keyframe: origin of the world frame, pose = (0, 0, 0).
+    graph_.addNode(estimated_pose_, odom_pose, current_points);
   }
 
   prev_keyframe_points_ = current_points;
@@ -93,6 +122,11 @@ Pose2D GraphPoseSlam::estimatedPose() const
 bool GraphPoseSlam::hasKeyframes() const
 {
   return has_keyframes_;
+}
+
+const PoseGraph & GraphPoseSlam::graph() const
+{
+  return graph_;
 }
 
 Pose2D GraphPoseSlam::computeOdomDelta(
