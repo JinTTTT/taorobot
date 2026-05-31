@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(g2o REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -19,6 +20,7 @@ add_library(graph_pose_slam_core
   src/graph_pose_slam.cpp
   src/correlative_scan_matcher.cpp
   src/pose_graph.cpp
+  src/pose_graph_optimizer.cpp
 )
 
 target_include_directories(graph_pose_slam_core PUBLIC
@@ -29,6 +31,12 @@ ament_target_dependencies(graph_pose_slam_core
   builtin_interfaces
   rclcpp
   sensor_msgs
+)
+
+target_link_libraries(graph_pose_slam_core
+  g2o::core
+  g2o::types_slam2d
+  g2o::solver_eigen
 )
 
 # ROS node (subscribes to /odom and /scan, runs the SLAM core)

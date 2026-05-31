@@ -129,7 +129,7 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
         }
       }
 
-      // Add only the best candidate found this keyframe.
+      // Add only the best candidate found this keyframe, then optimize the graph.
       if (best_cid >= 0) {
         confirmed_lc_pairs_.insert({best_cid, new_id});
         graph_.addEdge(best_cid, new_id, best_transform,
@@ -138,6 +138,22 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
           rclcpp::get_logger("graph_pose_slam"),
           "Loop closure: node %d → %d  score=%.3f  dist=%.2f m",
           best_cid, new_id, best_score, best_dist);
+
+        // Run graph optimization now that a loop closure constraint is available.
+        // The optimizer corrects all node poses simultaneously, then we update
+        // estimated_pose_ to the latest node's corrected position.
+        const auto t_opt = std::chrono::steady_clock::now();
+        if (optimizer_.optimize(graph_)) {
+          const double opt_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t_opt).count();
+          estimated_pose_ = graph_.getNode(new_id).pose;
+          RCLCPP_INFO(
+            rclcpp::get_logger("graph_pose_slam"),
+            "Graph optimized: %d nodes  %d edges  %.1f ms  "
+            "corrected pose=(%.3f, %.3f, %.3f rad)",
+            graph_.nodeCount(), graph_.edgeCount(), opt_ms,
+            estimated_pose_.x, estimated_pose_.y, estimated_pose_.theta);
+        }
       }
     }
   } else {

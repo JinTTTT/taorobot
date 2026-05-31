@@ -6,6 +6,7 @@
 
 #include "graph_pose_slam/correlative_scan_matcher.hpp"
 #include "graph_pose_slam/pose_graph.hpp"
+#include "graph_pose_slam/pose_graph_optimizer.hpp"
 #include "graph_pose_slam/types.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 
@@ -72,6 +73,7 @@ private:
   CorrelativeScanMatcher scan_matcher_{};    // sequential keyframe matching
   CorrelativeScanMatcher lc_scan_matcher_{}; // loop closure (wider search window, same likelihood field)
   PoseGraph graph_{};
+  PoseGraphOptimizer optimizer_{};
 
   // Every confirmed loop closure pair is stored here so the same (from, to) pair
   // is never checked again — prevents flooding the graph with redundant LC edges.

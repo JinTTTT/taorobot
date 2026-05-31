@@ -187,7 +187,7 @@ private:
     const Pose2D & odom_pose,
     const builtin_interfaces::msg::Time & stamp)
   {
-    // Append the raw odometry pose at this keyframe to the odom path.
+    // Odom path: append the raw odometry pose — odom never changes retroactively.
     geometry_msgs::msg::PoseStamped odom_stamped;
     odom_stamped.header.stamp = stamp;
     odom_stamped.header.frame_id = "odom";
@@ -198,14 +198,20 @@ private:
     odom_path_.header.stamp = stamp;
     odom_path_pub_->publish(odom_path_);
 
-    const Pose2D slam_pose = slam_.estimatedPose();
-    geometry_msgs::msg::PoseStamped slam_stamped;
-    slam_stamped.header.stamp = stamp;
-    slam_stamped.header.frame_id = "odom";
-    slam_stamped.pose.position.x = slam_pose.x;
-    slam_stamped.pose.position.y = slam_pose.y;
-    slam_stamped.pose.orientation = yawToQuaternion(slam_pose.theta);
-    slam_path_.poses.push_back(slam_stamped);
+    // SLAM path: rebuild entirely from graph node poses every keyframe.
+    // The optimizer corrects node poses in-place, so a rebuild automatically
+    // reflects any loop closure corrections — even for past keyframes.
+    slam_path_.poses.clear();
+    for (int i = 0; i < slam_.graph().nodeCount(); ++i) {
+      const auto & node = slam_.graph().getNode(i);
+      geometry_msgs::msg::PoseStamped ps;
+      ps.header.stamp = stamp;
+      ps.header.frame_id = "odom";
+      ps.pose.position.x = node.pose.x;
+      ps.pose.position.y = node.pose.y;
+      ps.pose.orientation = yawToQuaternion(node.pose.theta);
+      slam_path_.poses.push_back(ps);
+    }
     slam_path_.header.stamp = stamp;
     slam_path_pub_->publish(slam_path_);
   }
