@@ -102,10 +102,6 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
       Pose2D best_transform{};
 
       for (int cid = 0; cid < new_id - params_.lc_min_skip; ++cid) {
-        if (confirmed_lc_pairs_.count({cid, new_id})) {
-          continue;
-        }
-
         const PoseNode & candidate = graph_.getNode(cid);
 
         // Stage 1: cheap spatial filter.
@@ -131,7 +127,6 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
 
       // Add only the best candidate found this keyframe, then optimize the graph.
       if (best_cid >= 0) {
-        confirmed_lc_pairs_.insert({best_cid, new_id});
         graph_.addEdge(best_cid, new_id, best_transform,
           best_score * 20.0, EdgeType::LOOP_CLOSURE);
         RCLCPP_INFO(

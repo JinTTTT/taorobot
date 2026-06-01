@@ -1,7 +1,5 @@
 #pragma once
 
-#include <set>
-#include <utility>
 #include <vector>
 
 #include "graph_pose_slam/correlative_scan_matcher.hpp"
@@ -74,10 +72,6 @@ private:
   CorrelativeScanMatcher lc_scan_matcher_{}; // loop closure (wider search window, same likelihood field)
   PoseGraph graph_{};
   PoseGraphOptimizer optimizer_{};
-
-  // Every confirmed loop closure pair is stored here so the same (from, to) pair
-  // is never checked again — prevents flooding the graph with redundant LC edges.
-  std::set<std::pair<int, int>> confirmed_lc_pairs_{};
 
   std::vector<Point2D> prev_keyframe_points_{};
   Pose2D prev_keyframe_odom_{};

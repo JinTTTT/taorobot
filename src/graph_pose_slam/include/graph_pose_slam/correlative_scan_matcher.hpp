@@ -47,15 +47,6 @@ public:
     const std::vector<Point2D> & points_b,
     const Pose2D & initial_guess) const;
 
-  // Rotation-only search: fixes (x, y) from odom and searches only theta.
-  // Use when the robot rotated in place with little translation.
-  // Reduces the search from 3D to 1D, eliminating false (x,y) peaks that
-  // make the full search unreliable for pure-rotation keyframes.
-  ScanMatchResult matchRotationOnly(
-    const std::vector<Point2D> & points_a,
-    const std::vector<Point2D> & points_b,
-    const Pose2D & odom_delta) const;
-
 private:
   // A 2D grid where each cell stores how close it is to the nearest scan-A point.
   // Value 1.0 = right on top of a point, 0.0 = far away.
