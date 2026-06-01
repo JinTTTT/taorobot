@@ -49,6 +49,7 @@ public:
 
     slam_path_pub_ = create_publisher<nav_msgs::msg::Path>("/slam_path", 10);
     odom_path_pub_ = create_publisher<nav_msgs::msg::Path>("/odom_path", 10);
+    estimated_pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/estimated_pose", 10);
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
@@ -166,6 +167,12 @@ private:
       have_first_odom_ = true;
       RCLCPP_INFO_ONCE(get_logger(), "First odometry received.");
     }
+
+    // Publish the live SLAM pose here, at odom rate: it is the latched map -> odom
+    // correction composed with the freshest odom sample, so it is as smooth and
+    // up-to-date as the odometry itself.  Before the first keyframe the correction
+    // is identity, so this correctly reads map == odom.
+    publishEstimatedPose(odom_buffer_.back().pose, msg->header.stamp);
   }
 
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
@@ -272,6 +279,29 @@ private:
     tf_broadcaster_->sendTransform(msg);
   }
 
+  // Live robot pose in the map frame:  map_to_base = map_to_odom * odom_to_base.
+  // The correction (map_to_odom_) is latched at keyframes; odom_pose updates every
+  // scan, so the published pose moves smoothly between keyframes.
+  void publishEstimatedPose(const Pose2D & odom_pose, const builtin_interfaces::msg::Time & stamp)
+  {
+    tf2::Transform odom_to_base;
+    odom_to_base.setOrigin(tf2::Vector3(odom_pose.x, odom_pose.y, 0.0));
+    tf2::Quaternion odom_to_base_q;
+    odom_to_base_q.setRPY(0.0, 0.0, odom_pose.theta);
+    odom_to_base.setRotation(odom_to_base_q);
+
+    const tf2::Transform map_to_base = map_to_odom_ * odom_to_base;
+
+    geometry_msgs::msg::PoseStamped msg;
+    msg.header.stamp = stamp;
+    msg.header.frame_id = "map";
+    msg.pose.position.x = map_to_base.getOrigin().x();
+    msg.pose.position.y = map_to_base.getOrigin().y();
+    msg.pose.position.z = 0.0;
+    msg.pose.orientation = tf2::toMsg(map_to_base.getRotation());
+    estimated_pose_pub_->publish(msg);
+  }
+
   // ---------------------------------------------------------------------------
   // Members
   // ---------------------------------------------------------------------------
@@ -293,6 +323,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr slam_path_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr odom_path_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr estimated_pose_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };
 
