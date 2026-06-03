@@ -67,10 +67,11 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "graph_pose_slam_node started\n"
-      "  keyframe:  translation=%.2f m (translation-only)\n"
+      "  keyframe:  translation=%.2f m (translation-only)  local_map=%d keyframes\n"
       "  CSM:       min_score=%.2f  xy_step=%.3f m  theta_step=%.3f rad\n"
       "  LC:        radius=%.2f m  skip=%d  min_score=%.2f",
       slam_params_.min_translation_for_keyframe,
+      slam_params_.local_map_size,
       slam_params_.csm_min_score,
       slam_params_.csm_search_xy_step,
       slam_params_.csm_search_theta_step,
@@ -90,6 +91,10 @@ private:
       0.0,
       declare_parameter<double>(
         "min_translation_for_keyframe", slam_params_.min_translation_for_keyframe));
+
+    slam_params_.local_map_size = std::max(
+      1,
+      static_cast<int>(declare_parameter<int>("local_map_size", slam_params_.local_map_size)));
 
     slam_params_.csm_likelihood_max_dist = std::max(
       0.05,

@@ -6,6 +6,11 @@ graph_pose_slam_node:
     # Tested in simulation: 0.40 m gave visibly smoother path than 0.10 m.
     min_translation_for_keyframe: 0.40   # metres — rotation-only keyframes are never created
 
+    # Sequential matching reference: how many recent keyframes are stitched into the
+    # local map the new scan is matched against. 1 = plain scan-to-scan; larger reduces
+    # per-step drift by giving the matcher more structure to lock onto.
+    local_map_size: 5
+
     # Correlative scan matching — same likelihood field used for both sequential and loop closure.
     # Grid resolution is 0.05 m; values below that clamp to binary (on-wall=1.0, else=0.0).
     csm_likelihood_max_dist: 0.10        # metres — strict: point must be within 10 cm of a wall

@@ -17,6 +17,11 @@ struct GraphPoseSlamParameters
   // skipped: a 360° scan looks identical from the same spot, so they add no info.
   double min_translation_for_keyframe{0.40};   // metres
 
+  // Sequential matching reference: how many recent keyframes to stitch into the
+  // local map the new scan is matched against. 1 = plain scan-to-scan; larger gives
+  // the matcher more structure to lock onto, which reduces drift (scan-to-local-map).
+  int local_map_size{5};
+
   // Correlative scan matching (shared likelihood field for sequential and loop closure).
   double csm_likelihood_max_dist{0.10};   // metres a point may be from a wall to score > 0
   double csm_search_xy_range{0.20};       // search ±20 cm around the odom guess
@@ -64,9 +69,11 @@ public:
   const PoseGraph & graph() const;
 
 private:
-  Pose2D computeOdomDelta(
-    const Pose2D & odom_at_a,
-    const Pose2D & odom_at_b) const;
+  // Pose `b` expressed in pose `a`'s frame (relative motion a → b).
+  Pose2D relativePose(const Pose2D & a, const Pose2D & b) const;
+
+  // Stitch the last `count` keyframes' scans into node `reference_id`'s frame.
+  std::vector<Point2D> buildLocalMap(int reference_id, int count) const;
 
   GraphPoseSlamParameters params_{};
   CorrelativeScanMatcher scan_matcher_{};    // sequential keyframe matching
@@ -74,7 +81,6 @@ private:
   PoseGraph graph_{};
   PoseGraphOptimizer optimizer_{};
 
-  std::vector<Point2D> prev_keyframe_points_{};
   Pose2D prev_keyframe_odom_{};
   Pose2D estimated_pose_{};
   bool has_keyframes_{false};

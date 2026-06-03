@@ -54,10 +54,15 @@ KeyframeResult GraphPoseSlam::addKeyframe(
 
   if (has_keyframes_) {
     // Odom delta is the initial guess; the matcher searches a small window around it.
-    const Pose2D odom_delta = computeOdomDelta(prev_keyframe_odom_, odom_pose);
+    const Pose2D odom_delta = relativePose(prev_keyframe_odom_, odom_pose);
+
+    // Match against a local map (last N keyframes stitched into the previous
+    // keyframe's frame), not just the previous scan — far less drift per step.
+    const int prev_id = graph_.nodeCount() - 1;
+    const std::vector<Point2D> local_map = buildLocalMap(prev_id, params_.local_map_size);
 
     const auto t0 = std::chrono::steady_clock::now();
-    result = scan_matcher_.match(prev_keyframe_points_, current_points, odom_delta);
+    result = scan_matcher_.match(local_map, current_points, odom_delta);
     const double ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     RCLCPP_INFO(
@@ -77,7 +82,6 @@ KeyframeResult GraphPoseSlam::addKeyframe(
     };
 
     const int new_id = graph_.addNode(estimated_pose_, odom_pose, current_points, scan);
-    const int prev_id = new_id - 1;
 
     // Odometry edge: always added, cheap but drifts.
     graph_.addEdge(prev_id, new_id, odom_delta, 1.0, EdgeType::ODOM);
@@ -108,7 +112,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
         }
 
         // Then CSM with the wider window to absorb accumulated drift.
-        const Pose2D lc_guess = computeOdomDelta(candidate.pose, estimated_pose_);
+        const Pose2D lc_guess = relativePose(candidate.pose, estimated_pose_);
         const ScanMatchResult lc_result =
           lc_scan_matcher_.match(candidate.points, current_points, lc_guess);
 
@@ -151,9 +155,8 @@ KeyframeResult GraphPoseSlam::addKeyframe(
     graph_.addNode(estimated_pose_, odom_pose, current_points, scan);
   }
 
-  prev_keyframe_points_ = current_points;
-  prev_keyframe_odom_   = odom_pose;
-  has_keyframes_        = true;
+  prev_keyframe_odom_ = odom_pose;
+  has_keyframes_      = true;
 
   return outcome;
 }
@@ -173,20 +176,38 @@ const PoseGraph & GraphPoseSlam::graph() const
   return graph_;
 }
 
-Pose2D GraphPoseSlam::computeOdomDelta(
-  const Pose2D & odom_at_a,
-  const Pose2D & odom_at_b) const
+Pose2D GraphPoseSlam::relativePose(const Pose2D & a, const Pose2D & b) const
 {
-  const double dx_world = odom_at_b.x - odom_at_a.x;
-  const double dy_world = odom_at_b.y - odom_at_a.y;
-  const double cos_a    = std::cos(odom_at_a.theta);
-  const double sin_a    = std::sin(odom_at_a.theta);
+  const double dx_world = b.x - a.x;
+  const double dy_world = b.y - a.y;
+  const double cos_a    = std::cos(a.theta);
+  const double sin_a    = std::sin(a.theta);
 
   return Pose2D{
     cos_a * dx_world + sin_a * dy_world,
     -sin_a * dx_world + cos_a * dy_world,
-    normalizeAngle(odom_at_b.theta - odom_at_a.theta)
+    normalizeAngle(b.theta - a.theta)
   };
+}
+
+std::vector<Point2D> GraphPoseSlam::buildLocalMap(int reference_id, int count) const
+{
+  const Pose2D & ref = graph_.getNode(reference_id).pose;
+  const int start = std::max(0, reference_id - count + 1);
+
+  std::vector<Point2D> local_map;
+  for (int id = start; id <= reference_id; ++id) {
+    const PoseNode & node = graph_.getNode(id);
+
+    // This node's scan, expressed in the reference keyframe's frame.
+    const Pose2D rel = relativePose(ref, node.pose);
+    const double c = std::cos(rel.theta);
+    const double s = std::sin(rel.theta);
+    for (const auto & p : node.points) {
+      local_map.push_back({rel.x + c * p.x - s * p.y, rel.y + s * p.x + c * p.y});
+    }
+  }
+  return local_map;
 }
 
 }  // namespace graph_pose_slam
