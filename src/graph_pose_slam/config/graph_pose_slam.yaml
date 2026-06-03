@@ -14,10 +14,15 @@ graph_pose_slam_node:
     # Correlative scan matching — same likelihood field used for both sequential and loop closure.
     # Grid resolution is 0.05 m; values below that clamp to binary (on-wall=1.0, else=0.0).
     csm_likelihood_max_dist: 0.10        # metres — strict: point must be within 10 cm of a wall
+    # Coarse-to-fine search: a coarse pass over the full window, then a fine pass in a
+    # ±coarse-step box around the winner. The coarse steps must stay within the field's
+    # blur (likelihood_max_dist): xy_coarse ≤ that, theta_coarse bounded by far points.
     csm_search_xy_range: 0.20            # search ±20 cm around odom guess
-    csm_search_xy_step: 0.01             # 1 cm steps → 40 candidates in x and y
+    csm_search_xy_step: 0.01             # fine: 1 cm
+    csm_search_xy_coarse_step: 0.05      # coarse: 5 cm (≤ likelihood_max_dist)
     csm_search_theta_range: 0.3          # search ±~17 degrees
-    csm_search_theta_step: 0.01          # ~1 degree steps → 16 candidates
+    csm_search_theta_step: 0.01          # fine: ~0.5 degree
+    csm_search_theta_coarse_step: 0.01   # coarse: bounded by far points (≈ 2·L / max_range)
     csm_beam_step: 5                     # use every 5th beam when scoring
     # With likelihood_max_dist=0.10 m the score range drops vs the old 0.50 m field.
     # 0.65 accepts solid matches while still rejecting genuinely bad alignments.
@@ -28,7 +33,7 @@ graph_pose_slam_node:
     lc_min_skip: 5                      # skip this many recent sequential neighbors
     lc_csm_search_xy_range: 0.50        # wider than sequential — drift offsets the initial guess
     lc_csm_search_theta_range: 0.50     # ~29 degrees
-    lc_min_score: 0.85                  # CSM score required to confirm a loop closure
+    lc_min_score: 0.90                  # CSM score required to confirm a loop closure
 
     # Occupancy map — log-odds grid built from keyframe scans at their optimized poses.
     # Defaults mirror the standalone `mapping` package so both maps look the same.

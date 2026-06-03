@@ -1,6 +1,7 @@
 #include "graph_pose_slam/graph_pose_slam.hpp"
 #include "graph_pose_slam/utils.hpp"
 
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -30,6 +31,13 @@ using graph_pose_slam::lookupOdomAtStamp;
 using graph_pose_slam::odometryToPose2D;
 using graph_pose_slam::pruneOdomBuffer;
 using graph_pose_slam::yawToQuaternion;
+
+// Milliseconds elapsed since `start`.
+double elapsedMs(const std::chrono::steady_clock::time_point & start)
+{
+  return std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - start).count();
+}
 
 class GraphPoseSlamNode : public rclcpp::Node
 {
@@ -111,6 +119,11 @@ private:
       declare_parameter<double>(
         "csm_search_xy_step", slam_params_.csm_search_xy_step));
 
+    slam_params_.csm_search_xy_coarse_step = std::max(
+      slam_params_.csm_search_xy_step,
+      declare_parameter<double>(
+        "csm_search_xy_coarse_step", slam_params_.csm_search_xy_coarse_step));
+
     slam_params_.csm_search_theta_range = std::max(
       0.01,
       declare_parameter<double>(
@@ -120,6 +133,11 @@ private:
       0.005,
       declare_parameter<double>(
         "csm_search_theta_step", slam_params_.csm_search_theta_step));
+
+    slam_params_.csm_search_theta_coarse_step = std::max(
+      slam_params_.csm_search_theta_step,
+      declare_parameter<double>(
+        "csm_search_theta_coarse_step", slam_params_.csm_search_theta_coarse_step));
 
     slam_params_.csm_beam_step = static_cast<std::size_t>(std::max(
         1,
@@ -213,25 +231,52 @@ private:
     }
 
     if (slam_.shouldAcceptKeyframe(last_keyframe_odom_pose_, scan_odom_pose)) {
+      const auto t_keyframe = std::chrono::steady_clock::now();
       const KeyframeResult outcome = slam_.addKeyframe(scan_odom_pose, *msg);
       last_keyframe_odom_pose_ = scan_odom_pose;
 
       // Loop closure rewrites every past pose, so rebuild the whole grid;
       // otherwise just fold in the new keyframe's scan.
+      const auto t_map = std::chrono::steady_clock::now();
       if (outcome.loop_closed) {
         rebuildMap();
       } else {
         integrateLatestKeyframe();
       }
+      const double map_ms = elapsedMs(t_map);
+
+      const auto t_publish = std::chrono::steady_clock::now();
       publishMap(msg->header.stamp);
+      const double publish_ms = elapsedMs(t_publish);
 
       updateMapToOdom(slam_.estimatedPose(), scan_odom_pose);
       publishPoseGraph(msg->header.stamp);
+
+      logKeyframeTiming(outcome, map_ms, publish_ms, elapsedMs(t_keyframe));
     }
 
     // Re-broadcast every scan so the map -> odom TF never goes stale between
     // keyframes; the correction itself only changes when a keyframe is added.
     broadcastMapToOdom(msg->header.stamp);
+  }
+
+  // One consolidated timing line per keyframe (addKeyframe stages + map + publish).
+  void logKeyframeTiming(
+    const KeyframeResult & outcome, double map_ms, double publish_ms, double total_ms)
+  {
+    const auto & t = outcome.timing;
+    RCLCPP_INFO(
+      get_logger(),
+      "keyframe %d: total=%.1fms | extract=%.1f localmap=%.1f csm=%.1f(%.2f %s) "
+      "lc=%.1f(%d cand%s) opt=%.1f | map=%.1f(%s) pub=%.1f | %d nodes %d edges",
+      slam_.graph().nodeCount() - 1, total_ms,
+      t.extract_ms, t.local_map_ms,
+      t.sequential_match_ms, outcome.scan_match.score,
+      outcome.scan_match.matched ? "MATCH" : "odom",
+      t.loop_search_ms, t.loop_candidates, outcome.loop_closed ? " CLOSED" : "",
+      t.optimize_ms,
+      map_ms, outcome.loop_closed ? "rebuild" : "incr", publish_ms,
+      slam_.graph().nodeCount(), slam_.graph().edgeCount());
   }
 
   // ---------------------------------------------------------------------------

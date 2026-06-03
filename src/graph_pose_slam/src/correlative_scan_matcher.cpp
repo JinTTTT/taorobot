@@ -119,8 +119,43 @@ double CorrelativeScanMatcher::scoreAtPose(
   return count > 0 ? total / count : 0.0;
 }
 
-// Brute-force search: build scan A's field, score every (dx, dy, dtheta) offset around
-// the initial guess, return the best-scoring transform (falls back to the guess).
+// Search a grid of poses around `center`, returning the best-scoring one.
+Pose2D CorrelativeScanMatcher::searchBestPose(
+  const std::vector<Point2D> & points_b,
+  const LikelihoodField & field,
+  const Pose2D & center,
+  double xy_range, double xy_step,
+  double theta_range, double theta_step,
+  double & out_best_score) const
+{
+  double best_score = -1.0;
+  Pose2D best = center;
+
+  for (double dx = -xy_range; dx <= xy_range + 1e-9; dx += xy_step) {
+    for (double dy = -xy_range; dy <= xy_range + 1e-9; dy += xy_step) {
+      for (double dtheta = -theta_range; dtheta <= theta_range + 1e-9; dtheta += theta_step) {
+        const Pose2D candidate{
+          center.x + dx,
+          center.y + dy,
+          normalizeAngle(center.theta + dtheta)
+        };
+
+        const double score = scoreAtPose(points_b, candidate, field);
+        if (score > best_score) {
+          best_score = score;
+          best = candidate;
+        }
+      }
+    }
+  }
+
+  out_best_score = best_score;
+  return best;
+}
+
+// Coarse-to-fine search: build scan A's field, scan the full window at a coarse step,
+// then refine in a ±coarse-step box around the winner. ~100x fewer scorings than a
+// single fine-resolution sweep, with the same final precision. Falls back to the guess.
 ScanMatchResult CorrelativeScanMatcher::match(
   const std::vector<Point2D> & points_a,
   const std::vector<Point2D> & points_b,
@@ -135,39 +170,25 @@ ScanMatchResult CorrelativeScanMatcher::match(
 
   const LikelihoodField field = buildLikelihoodField(points_a);
 
-  double best_score = -1.0;
-  Pose2D best_transform = initial_guess;
+  // Coarse pass: full window at the coarse step.
+  double coarse_score = -1.0;
+  const Pose2D coarse = searchBestPose(
+    points_b, field, initial_guess,
+    options_.search_xy_range, options_.search_xy_coarse_step,
+    options_.search_theta_range, options_.search_theta_coarse_step,
+    coarse_score);
 
-  for (double dx = -options_.search_xy_range;
-    dx <= options_.search_xy_range + 1e-9;
-    dx += options_.search_xy_step)
-  {
-    for (double dy = -options_.search_xy_range;
-      dy <= options_.search_xy_range + 1e-9;
-      dy += options_.search_xy_step)
-    {
-      for (double dtheta = -options_.search_theta_range;
-        dtheta <= options_.search_theta_range + 1e-9;
-        dtheta += options_.search_theta_step)
-      {
-        Pose2D candidate{
-          initial_guess.x + dx,
-          initial_guess.y + dy,
-          normalizeAngle(initial_guess.theta + dtheta)
-        };
+  // Fine pass: ±one coarse step around the coarse winner, at the fine step.
+  double fine_score = -1.0;
+  const Pose2D fine = searchBestPose(
+    points_b, field, coarse,
+    options_.search_xy_coarse_step, options_.search_xy_step,
+    options_.search_theta_coarse_step, options_.search_theta_step,
+    fine_score);
 
-        const double score = scoreAtPose(points_b, candidate, field);
-        if (score > best_score) {
-          best_score = score;
-          best_transform = candidate;
-        }
-      }
-    }
-  }
-
-  result.transform = best_transform;
-  result.score     = best_score;
-  result.matched   = best_score >= options_.min_score;
+  result.transform = fine;
+  result.score     = fine_score;
+  result.matched   = fine_score >= options_.min_score;
   return result;
 }
 

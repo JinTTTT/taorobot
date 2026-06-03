@@ -8,29 +8,43 @@
 namespace graph_pose_slam
 {
 
+namespace
+{
+// Milliseconds elapsed since `start`.
+double elapsedMs(const std::chrono::steady_clock::time_point & start)
+{
+  return std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - start).count();
+}
+}  // namespace
+
 void GraphPoseSlam::configure(const GraphPoseSlamParameters & params)
 {
   params_ = params;
 
   CorrelativeMatchOptions csm_options;
-  csm_options.likelihood_max_dist  = params_.csm_likelihood_max_dist;
-  csm_options.search_xy_range      = params_.csm_search_xy_range;
-  csm_options.search_xy_step       = params_.csm_search_xy_step;
-  csm_options.search_theta_range   = params_.csm_search_theta_range;
-  csm_options.search_theta_step    = params_.csm_search_theta_step;
-  csm_options.beam_step            = params_.csm_beam_step;
-  csm_options.min_score            = params_.csm_min_score;
+  csm_options.likelihood_max_dist    = params_.csm_likelihood_max_dist;
+  csm_options.search_xy_range        = params_.csm_search_xy_range;
+  csm_options.search_xy_step         = params_.csm_search_xy_step;
+  csm_options.search_xy_coarse_step  = params_.csm_search_xy_coarse_step;
+  csm_options.search_theta_range     = params_.csm_search_theta_range;
+  csm_options.search_theta_step      = params_.csm_search_theta_step;
+  csm_options.search_theta_coarse_step = params_.csm_search_theta_coarse_step;
+  csm_options.beam_step              = params_.csm_beam_step;
+  csm_options.min_score              = params_.csm_min_score;
   scan_matcher_.configure(csm_options);
 
-  // Loop closure matcher: same likelihood field, wider search window for drift.
+  // Loop closure matcher: same likelihood field and coarse-to-fine steps, wider window.
   CorrelativeMatchOptions lc_options;
-  lc_options.likelihood_max_dist  = params_.csm_likelihood_max_dist;
-  lc_options.search_xy_range      = params_.lc_csm_search_xy_range;
-  lc_options.search_xy_step       = params_.csm_search_xy_step;
-  lc_options.search_theta_range   = params_.lc_csm_search_theta_range;
-  lc_options.search_theta_step    = params_.csm_search_theta_step;
-  lc_options.beam_step            = params_.csm_beam_step;
-  lc_options.min_score            = params_.lc_min_score;
+  lc_options.likelihood_max_dist     = params_.csm_likelihood_max_dist;
+  lc_options.search_xy_range         = params_.lc_csm_search_xy_range;
+  lc_options.search_xy_step          = params_.csm_search_xy_step;
+  lc_options.search_xy_coarse_step   = params_.csm_search_xy_coarse_step;
+  lc_options.search_theta_range      = params_.lc_csm_search_theta_range;
+  lc_options.search_theta_step       = params_.csm_search_theta_step;
+  lc_options.search_theta_coarse_step = params_.csm_search_theta_coarse_step;
+  lc_options.beam_step               = params_.csm_beam_step;
+  lc_options.min_score               = params_.lc_min_score;
   lc_scan_matcher_.configure(lc_options);
 }
 
@@ -47,10 +61,12 @@ KeyframeResult GraphPoseSlam::addKeyframe(
   const Pose2D & odom_pose,
   const sensor_msgs::msg::LaserScan & scan)
 {
+  const auto t_extract = std::chrono::steady_clock::now();
   const std::vector<Point2D> current_points = scan_matcher_.extractPoints(scan);
 
   KeyframeResult outcome;
   ScanMatchResult & result = outcome.scan_match;
+  outcome.timing.extract_ms = elapsedMs(t_extract);
 
   if (has_keyframes_) {
     // Odom delta is the initial guess; the matcher searches a small window around it.
@@ -59,18 +75,13 @@ KeyframeResult GraphPoseSlam::addKeyframe(
     // Match against a local map (last N keyframes stitched into the previous
     // keyframe's frame), not just the previous scan — far less drift per step.
     const int prev_id = graph_.nodeCount() - 1;
+    const auto t_local = std::chrono::steady_clock::now();
     const std::vector<Point2D> local_map = buildLocalMap(prev_id, params_.local_map_size);
+    outcome.timing.local_map_ms = elapsedMs(t_local);
 
-    const auto t0 = std::chrono::steady_clock::now();
+    const auto t_match = std::chrono::steady_clock::now();
     result = scan_matcher_.match(local_map, current_points, odom_delta);
-    const double ms =
-      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    RCLCPP_INFO(
-      rclcpp::get_logger("graph_pose_slam"),
-      "CSM: score=%.3f, %s, time=%.2f ms",
-      result.score,
-      result.matched ? "MATCHED" : "no match (using odom)",
-      ms);
+    outcome.timing.sequential_match_ms = elapsedMs(t_match);
 
     // Compose the result into the running world pose estimate.
     const double cos_prev = std::cos(estimated_pose_.theta);
@@ -100,6 +111,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
       double best_dist   = 0.0;
       Pose2D best_transform{};
 
+      const auto t_loop = std::chrono::steady_clock::now();
       for (int cid = 0; cid < new_id - params_.lc_min_skip; ++cid) {
         const PoseNode & candidate = graph_.getNode(cid);
 
@@ -112,6 +124,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
         }
 
         // Then CSM with the wider window to absorb accumulated drift.
+        ++outcome.timing.loop_candidates;
         const Pose2D lc_guess = relativePose(candidate.pose, estimated_pose_);
         const ScanMatchResult lc_result =
           lc_scan_matcher_.match(candidate.points, current_points, lc_guess);
@@ -123,6 +136,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
           best_transform = lc_result.transform;
         }
       }
+      outcome.timing.loop_search_ms = elapsedMs(t_loop);
 
       if (best_cid >= 0) {
         graph_.addEdge(best_cid, new_id, best_transform,
@@ -136,15 +150,8 @@ KeyframeResult GraphPoseSlam::addKeyframe(
         const auto t_opt = std::chrono::steady_clock::now();
         if (optimizer_.optimize(graph_)) {
           outcome.loop_closed = true;
-          const double opt_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - t_opt).count();
+          outcome.timing.optimize_ms = elapsedMs(t_opt);
           estimated_pose_ = graph_.getNode(new_id).pose;
-          RCLCPP_INFO(
-            rclcpp::get_logger("graph_pose_slam"),
-            "Graph optimized: %d nodes  %d edges  %.1f ms  "
-            "corrected pose=(%.3f, %.3f, %.3f rad)",
-            graph_.nodeCount(), graph_.edgeCount(), opt_ms,
-            estimated_pose_.x, estimated_pose_.y, estimated_pose_.theta);
         }
       }
     }

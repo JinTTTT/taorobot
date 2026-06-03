@@ -15,11 +15,14 @@ struct CorrelativeMatchOptions
   double grid_half_size{10.0};        // grid spans [-half, +half] on both axes
   double likelihood_max_dist{0.50};   // how far likelihood spreads from a wall point
 
-  // Brute-force search around the initial guess.
+  // Coarse-to-fine search around the initial guess: a coarse pass over the full
+  // window, then a fine pass in a ±coarse-step box around the coarse winner.
   double search_xy_range{0.20};       // search ±20 cm
-  double search_xy_step{0.02};        // 2 cm steps
+  double search_xy_step{0.02};        // fine translation step
+  double search_xy_coarse_step{0.05}; // coarse translation step (≤ likelihood_max_dist)
   double search_theta_range{0.15};    // search ±~9 degrees
-  double search_theta_step{0.02};     // ~1 degree steps
+  double search_theta_step{0.02};     // fine rotation step
+  double search_theta_coarse_step{0.01}; // coarse rotation step (bounded by far points)
 
   std::size_t beam_step{5};           // score every Nth beam
   double min_score{0.20};             // below this → match rejected, fall back to odom
@@ -74,6 +77,15 @@ private:
     const std::vector<Point2D> & points_b,
     const Pose2D & pose,
     const LikelihoodField & field) const;
+
+  // Best-scoring pose on a grid around `center` (one pass of the coarse-to-fine search).
+  Pose2D searchBestPose(
+    const std::vector<Point2D> & points_b,
+    const LikelihoodField & field,
+    const Pose2D & center,
+    double xy_range, double xy_step,
+    double theta_range, double theta_step,
+    double & out_best_score) const;
 
   CorrelativeMatchOptions options_{};
 };

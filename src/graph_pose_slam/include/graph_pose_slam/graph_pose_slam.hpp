@@ -25,9 +25,11 @@ struct GraphPoseSlamParameters
   // Correlative scan matching (shared likelihood field for sequential and loop closure).
   double csm_likelihood_max_dist{0.10};   // metres a point may be from a wall to score > 0
   double csm_search_xy_range{0.20};       // search ±20 cm around the odom guess
-  double csm_search_xy_step{0.02};        // 2 cm step
+  double csm_search_xy_step{0.02};        // fine translation step
+  double csm_search_xy_coarse_step{0.05}; // coarse translation step (≤ likelihood_max_dist)
   double csm_search_theta_range{0.30};    // search ±~17 degrees
-  double csm_search_theta_step{0.02};     // ~1 degree step
+  double csm_search_theta_step{0.02};     // fine rotation step
+  double csm_search_theta_coarse_step{0.01}; // coarse rotation step (bounded by far points)
   std::size_t csm_beam_step{5};           // score every Nth beam
   double csm_min_score{0.95};             // below this → match rejected
 
@@ -39,11 +41,23 @@ struct GraphPoseSlamParameters
   double lc_min_score{0.85};               // confirmation threshold for a loop closure
 };
 
+// Per-stage timings (milliseconds) for one addKeyframe call, for profiling.
+struct KeyframeTiming
+{
+  double extract_ms{0.0};           // scan → points
+  double local_map_ms{0.0};         // stitch the local map
+  double sequential_match_ms{0.0};  // sequential CSM
+  double loop_search_ms{0.0};       // loop-closure candidate search (all candidates)
+  int    loop_candidates{0};        // candidates that passed the spatial filter and ran CSM
+  double optimize_ms{0.0};          // graph optimization (0 if no loop closure)
+};
+
 // Result of adding a keyframe, so the caller can choose incremental vs full map rebuild.
 struct KeyframeResult
 {
   ScanMatchResult scan_match{};  // sequential CSM result (transform + score)
   bool loop_closed{false};       // a loop closure fired and the graph was optimized
+  KeyframeTiming timing{};       // per-stage timings for this call
 };
 
 class GraphPoseSlam
