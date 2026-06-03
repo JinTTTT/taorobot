@@ -12,10 +12,7 @@ void CorrelativeScanMatcher::configure(const CorrelativeMatchOptions & options)
   options_ = options;
 }
 
-// ---------------------------------------------------------------------------
-// Scan preprocessing — same idea as the ICP matcher had
-// ---------------------------------------------------------------------------
-
+// Convert a laser scan into 2D hit points in the sensor frame (drops invalid beams).
 std::vector<Point2D> CorrelativeScanMatcher::extractPoints(
   const sensor_msgs::msg::LaserScan & scan) const
 {
@@ -34,14 +31,8 @@ std::vector<Point2D> CorrelativeScanMatcher::extractPoints(
   return points;
 }
 
-// ---------------------------------------------------------------------------
-// Step 1: Build likelihood field from scan A
-// ---------------------------------------------------------------------------
-// We allocate a fixed 400x400 grid (±10m at 5cm resolution).
-// Every cell that a scan-A point lands in is "occupied" (distance = 0).
-// BFS flood-fills outward, assigning distance to nearest occupied cell.
-// Finally we convert distance → likelihood: close = 1.0, far = 0.0.
-
+// Build the likelihood field from scan A: seed cells at each point, BFS the distance
+// to the nearest point outward, then map distance → likelihood (close = 1, far = 0).
 CorrelativeScanMatcher::LikelihoodField CorrelativeScanMatcher::buildLikelihoodField(
   const std::vector<Point2D> & points) const
 {
@@ -89,9 +80,7 @@ CorrelativeScanMatcher::LikelihoodField CorrelativeScanMatcher::buildLikelihoodF
     }
   }
 
-  // Convert cell distance → linear likelihood value [0, 1].
-  // Clamped to [0, 1]: when likelihood_max_dist < grid_resolution the formula
-  // would go negative for adjacent cells — clamp makes it binary (on-wall=1, else=0).
+  // Distance → likelihood, clamped to [0, 1] (binary when max_dist < resolution).
   field.data.assign(N, 0.0f);
   for (int i = 0; i < N; ++i) {
     if (dist[i] > max_dist_cells) {continue;}
@@ -103,13 +92,8 @@ CorrelativeScanMatcher::LikelihoodField CorrelativeScanMatcher::buildLikelihoodF
   return field;
 }
 
-// ---------------------------------------------------------------------------
-// Step 2: Score a candidate pose
-// ---------------------------------------------------------------------------
-// Transform each point in points_b by the candidate pose (into scan A's frame),
-// look it up in the likelihood field, and return the average value.
-// High average = points_b lands on top of scan A's walls = good match.
-
+// Score a pose: transform points_b into scan A's frame and average their field values.
+// Higher = points_b lands on top of scan A's walls = better alignment.
 double CorrelativeScanMatcher::scoreAtPose(
   const std::vector<Point2D> & points_b,
   const Pose2D & pose,
@@ -135,13 +119,8 @@ double CorrelativeScanMatcher::scoreAtPose(
   return count > 0 ? total / count : 0.0;
 }
 
-// ---------------------------------------------------------------------------
-// Main match function
-// ---------------------------------------------------------------------------
-// 1. Build likelihood field from scan A.
-// 2. Try all (dx, dy, dtheta) offsets around the odometry initial_guess.
-// 3. Return the candidate with the highest score.
-
+// Brute-force search: build scan A's field, score every (dx, dy, dtheta) offset around
+// the initial guess, return the best-scoring transform (falls back to the guess).
 ScanMatchResult CorrelativeScanMatcher::match(
   const std::vector<Point2D> & points_a,
   const std::vector<Point2D> & points_b,

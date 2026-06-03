@@ -18,11 +18,7 @@ bool PoseGraphOptimizer::optimize(PoseGraph & graph, int iterations)
     return false;
   }
 
-  // ---------------------------------------------------------------------------
-  // Build the g2o solver
-  // BlockSolverX handles variable-size poses (safe for pure pose-graph SLAM).
-  // LinearSolverEigen uses Eigen's sparse Cholesky — no extra system deps.
-  // ---------------------------------------------------------------------------
+  // Build the g2o solver: BlockSolverX + Eigen sparse Cholesky (no extra system deps).
   using BlockSolverType = g2o::BlockSolverX;
   using LinearSolverType = g2o::LinearSolverEigen<BlockSolverType::PoseMatrixType>;
 
@@ -34,10 +30,7 @@ bool PoseGraphOptimizer::optimize(PoseGraph & graph, int iterations)
   optimizer.setAlgorithm(algorithm);
   optimizer.setVerbose(false);
 
-  // ---------------------------------------------------------------------------
-  // Add one VertexSE2 per keyframe node.
-  // Node 0 is pinned (setFixed) — it is the world-frame anchor.
-  // ---------------------------------------------------------------------------
+  // One VertexSE2 per node; node 0 is pinned as the world-frame anchor.
   for (int i = 0; i < graph.nodeCount(); ++i) {
     const PoseNode & node = graph.getNode(i);
 
@@ -48,17 +41,8 @@ bool PoseGraphOptimizer::optimize(PoseGraph & graph, int iterations)
     optimizer.addVertex(v);
   }
 
-  // ---------------------------------------------------------------------------
-  // Add one EdgeSE2 per graph edge.
-  //
-  // Information matrix (3×3 diagonal, inverse covariance):
-  //   (x, y) get weight W,  theta gets 5×W  (rotation measured more precisely).
-  //
-  // Base weights per edge type (edge.information already encodes relative trust):
-  //   ODOM         info = 1.0        → xy=100,   theta=500
-  //   SCAN_MATCH   info ≈ 7–10      → xy=700–1000, theta=3500–5000
-  //   LOOP_CLOSURE info ≈ 14–20     → xy=1400–2000, theta=7000–10000
-  // ---------------------------------------------------------------------------
+  // One EdgeSE2 per graph edge. Information matrix is diagonal (inverse covariance):
+  // xy get weight W = edge.information * 100, theta gets 5×W (rotation is more precise).
   for (const auto & edge : graph.edges()) {
     auto * e = new g2o::EdgeSE2();
     e->setVertex(0, optimizer.vertex(edge.from_id));
@@ -76,9 +60,7 @@ bool PoseGraphOptimizer::optimize(PoseGraph & graph, int iterations)
     optimizer.addEdge(e);
   }
 
-  // ---------------------------------------------------------------------------
-  // Solve and write corrected poses back into the PoseGraph.
-  // ---------------------------------------------------------------------------
+  // Solve and write the corrected poses back into the PoseGraph.
   optimizer.initializeOptimization();
   optimizer.optimize(iterations);
 

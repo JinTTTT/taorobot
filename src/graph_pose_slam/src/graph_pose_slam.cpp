@@ -22,8 +22,7 @@ void GraphPoseSlam::configure(const GraphPoseSlamParameters & params)
   csm_options.min_score            = params_.csm_min_score;
   scan_matcher_.configure(csm_options);
 
-  // Loop closure matcher: wider search window because drift may offset the initial guess.
-  // Same likelihood field as sequential — one shared strict parameter for both.
+  // Loop closure matcher: same likelihood field, wider search window for drift.
   CorrelativeMatchOptions lc_options;
   lc_options.likelihood_max_dist  = params_.csm_likelihood_max_dist;
   lc_options.search_xy_range      = params_.lc_csm_search_xy_range;
@@ -54,8 +53,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
   ScanMatchResult & result = outcome.scan_match;
 
   if (has_keyframes_) {
-    // Use the odom delta as the initial guess.
-    // The correlative matcher then searches a small window around it.
+    // Odom delta is the initial guess; the matcher searches a small window around it.
     const Pose2D odom_delta = computeOdomDelta(prev_keyframe_odom_, odom_pose);
 
     const auto t0 = std::chrono::steady_clock::now();
@@ -78,24 +76,20 @@ KeyframeResult GraphPoseSlam::addKeyframe(
       normalizeAngle(estimated_pose_.theta + result.transform.theta)
     };
 
-    // Insert the new keyframe into the pose graph.
     const int new_id = graph_.addNode(estimated_pose_, odom_pose, current_points, scan);
     const int prev_id = new_id - 1;
 
-    // Odometry edge: always added — cheap but drifts.
+    // Odometry edge: always added, cheap but drifts.
     graph_.addEdge(prev_id, new_id, odom_delta, 1.0, EdgeType::ODOM);
 
-    // Scan-match edge: added only when CSM succeeded — more accurate than odom.
-    // Information weight is proportional to the match score so a high-confidence
-    // match is trusted more than a borderline one.
+    // Scan-match edge: only on success, weighted by score (trust good matches more).
     if (result.matched) {
       const double scan_match_information = result.score * 10.0;
       graph_.addEdge(prev_id, new_id, result.transform, scan_match_information, EdgeType::SCAN_MATCH);
     }
 
-    // Loop closure detection: scan all old nodes (skip lc_min_skip recent neighbors),
-    // run CSM against each spatial candidate, then add only the single best-scoring
-    // match as an LC edge. One edge per keyframe keeps the graph clean.
+    // Loop closure: among old nodes (skipping recent neighbours) within search radius,
+    // keep the single best CSM match and add it as one LC edge.
     if (new_id > params_.lc_min_skip) {
       int    best_cid    = -1;
       double best_score  = -1.0;
@@ -105,7 +99,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
       for (int cid = 0; cid < new_id - params_.lc_min_skip; ++cid) {
         const PoseNode & candidate = graph_.getNode(cid);
 
-        // Stage 1: cheap spatial filter.
+        // Cheap spatial filter first.
         const double dist = std::hypot(
           estimated_pose_.x - candidate.pose.x,
           estimated_pose_.y - candidate.pose.y);
@@ -113,7 +107,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
           continue;
         }
 
-        // Stage 2: CSM with wider search window to account for accumulated drift.
+        // Then CSM with the wider window to absorb accumulated drift.
         const Pose2D lc_guess = computeOdomDelta(candidate.pose, estimated_pose_);
         const ScanMatchResult lc_result =
           lc_scan_matcher_.match(candidate.points, current_points, lc_guess);
@@ -126,7 +120,6 @@ KeyframeResult GraphPoseSlam::addKeyframe(
         }
       }
 
-      // Add only the best candidate found this keyframe, then optimize the graph.
       if (best_cid >= 0) {
         graph_.addEdge(best_cid, new_id, best_transform,
           best_score * 20.0, EdgeType::LOOP_CLOSURE);
@@ -135,9 +128,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
           "Loop closure: node %d → %d  score=%.3f  dist=%.2f m",
           best_cid, new_id, best_score, best_dist);
 
-        // Run graph optimization now that a loop closure constraint is available.
-        // The optimizer corrects all node poses simultaneously, then we update
-        // estimated_pose_ to the latest node's corrected position.
+        // Optimize: corrects all node poses, then refresh estimated_pose_ from the latest.
         const auto t_opt = std::chrono::steady_clock::now();
         if (optimizer_.optimize(graph_)) {
           outcome.loop_closed = true;
@@ -154,10 +145,8 @@ KeyframeResult GraphPoseSlam::addKeyframe(
       }
     }
   } else {
-    // First keyframe: anchor the SLAM world frame to the odom frame.
-    // Using the full odom pose (not a hardcoded (0,0)) means the SLAM path and
-    // odom path start at exactly the same point in RViz, so any later divergence
-    // is a real and visible correction, not just a coordinate-frame offset.
+    // First keyframe anchors the world frame to the current odom pose, so the SLAM
+    // and odom trajectories start at the same point and later divergence is real drift.
     estimated_pose_ = odom_pose;
     graph_.addNode(estimated_pose_, odom_pose, current_points, scan);
   }

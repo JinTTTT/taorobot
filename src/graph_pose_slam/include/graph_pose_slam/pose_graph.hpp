@@ -15,36 +15,31 @@ struct PoseNode
   Pose2D pose{};       // best estimated world pose (updated by optimizer later)
   Pose2D odom_pose{};  // raw wheel odometry at this keyframe (never changes)
   std::vector<Point2D> points{};  // lidar hit points in sensor-local frame (used by CSM)
-  // Raw lidar scan, kept so the occupancy map can be rebuilt from optimized poses.
-  // Unlike `points` (hits only), the raw scan also encodes miss beams, which carve
-  // out free space during ray-tracing — essential for a consistent occupancy grid.
+  // Raw scan for map rebuilds: unlike `points` (hits only) it keeps miss beams,
+  // which carve out free space during ray-tracing.
   sensor_msgs::msg::LaserScan scan{};
 };
 
-// What kind of measurement produced this edge.
-// Matters later when the optimizer decides how much to trust each constraint.
+// What kind of measurement produced an edge; sets how much the optimizer trusts it.
 enum class EdgeType
 {
-  ODOM,         // derived from wheel odometry — drifts over time, cheap to compute
-  SCAN_MATCH,   // derived from CSM — more accurate than odom, slightly expensive
-  LOOP_CLOSURE  // CSM against a non-adjacent old keyframe — the drift-correcting magic
+  ODOM,         // wheel odometry — cheap but drifts
+  SCAN_MATCH,   // CSM between adjacent keyframes — more accurate than odom
+  LOOP_CLOSURE  // CSM against a non-adjacent old keyframe — corrects drift
 };
 
-// A constraint between two keyframes: "when I was at node `from_id`, the robot
-// moved by `transform` to reach node `to_id`."
-// `information` is the optimizer's confidence weight — higher means "trust this more."
+// A constraint "from node `from_id`, the robot moved by `transform` to `to_id`".
 struct PoseEdge
 {
   int from_id{-1};
   int to_id{-1};
-  Pose2D transform{};     // relative motion: from_id → to_id
-  double information{1.0}; // inverse-variance weight (1 = baseline, >1 = more trusted)
+  Pose2D transform{};      // relative motion: from_id → to_id
+  double information{1.0}; // inverse-variance weight (higher = more trusted)
   EdgeType type{EdgeType::ODOM};
 };
 
-// The pose graph: a collection of nodes (keyframe poses) connected by edges
-// (motion constraints). The optimizer (future step) will adjust node poses so
-// that all edge constraints are satisfied as consistently as possible.
+// Nodes (keyframe poses) connected by edges (motion constraints). The optimizer
+// adjusts node poses so all edge constraints are satisfied as consistently as possible.
 class PoseGraph
 {
 public:
@@ -72,7 +67,7 @@ public:
   int edgeCount() const;
   bool empty() const;
 
-  // Overwrite a node's pose in place (used by optimizer in a future step).
+  // Overwrite a node's pose in place (used by the optimizer).
   void updateNodePose(int id, const Pose2D & new_pose);
 
 private:

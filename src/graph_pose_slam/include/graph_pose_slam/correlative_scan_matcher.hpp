@@ -10,26 +10,26 @@ namespace graph_pose_slam
 
 struct CorrelativeMatchOptions
 {
-  // Likelihood field grid (Option A: fixed 400x400 grid covering ±10m)
+  // Likelihood field grid (fixed, covering ±grid_half_size metres).
   double grid_resolution{0.05};       // metres per cell
-  double grid_half_size{10.0};        // grid spans [-10m, +10m] on both axes
-  double likelihood_max_dist{0.50};   // how far the distance transform spreads from a wall point
+  double grid_half_size{10.0};        // grid spans [-half, +half] on both axes
+  double likelihood_max_dist{0.50};   // how far likelihood spreads from a wall point
 
-  // Brute-force search range around the initial guess (odometry delta)
+  // Brute-force search around the initial guess.
   double search_xy_range{0.20};       // search ±20 cm
-  double search_xy_step{0.02};        // 2 cm steps → 21×21 xy candidates
+  double search_xy_step{0.02};        // 2 cm steps
   double search_theta_range{0.15};    // search ±~9 degrees
-  double search_theta_step{0.02};     // ~1 degree steps → 16 theta candidates
+  double search_theta_step{0.02};     // ~1 degree steps
 
-  std::size_t beam_step{5};           // use every 5th beam (speeds up scoring)
-  double min_score{0.20};             // score below this → match rejected, fall back to odom
+  std::size_t beam_step{5};           // score every Nth beam
+  double min_score{0.20};             // below this → match rejected, fall back to odom
 };
 
 struct ScanMatchResult
 {
-  Pose2D transform{};    // best transform found (moves scan B points into scan A's frame)
-  double score{0.0};     // 0.0 → 1.0, higher means better alignment
-  bool matched{false};   // true when score >= min_score
+  Pose2D transform{};    // best transform (moves scan B points into scan A's frame)
+  double score{0.0};     // 0 → 1, higher is better
+  bool matched{false};   // score >= min_score
 };
 
 class CorrelativeScanMatcher

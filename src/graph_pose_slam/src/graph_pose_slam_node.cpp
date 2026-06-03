@@ -51,25 +51,18 @@ public:
       rclcpp::SensorDataQoS(),
       std::bind(&GraphPoseSlamNode::scanCallback, this, std::placeholders::_1));
 
-    slam_path_pub_ = create_publisher<nav_msgs::msg::Path>("/slam_path", 10);
-    odom_path_pub_ = create_publisher<nav_msgs::msg::Path>("/odom_path", 10);
+    pose_graph_pub_ = create_publisher<nav_msgs::msg::Path>("/poses_graph", 10);
     estimated_pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/estimated_pose", 10);
 
-    // Map QoS: latched (transient_local) so RViz gets the latest grid even if it
-    // subscribes after the map was last published.  The grid only changes at keyframes.
+    // Latched QoS so a late RViz subscriber still receives the last map.
     map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
       "/map", rclcpp::QoS(1).transient_local().reliable());
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
-    // map -> odom starts as identity: at startup the SLAM world frame is aligned
-    // with the odom frame, so the correction only grows once drift is corrected.
+    // Identity correction at startup: map and odom start aligned.
     map_to_odom_.setIdentity();
-
-    // SLAM path lives in the corrected map frame; odom path stays in the raw odom
-    // frame.  The map -> odom TF we broadcast lets RViz overlay them correctly.
-    slam_path_.header.frame_id = "map";
-    odom_path_.header.frame_id = "odom";
+    pose_graph_.header.frame_id = "map";
 
     RCLCPP_INFO(
       get_logger(),
@@ -161,8 +154,7 @@ private:
 
   }
 
-  // Build the occupancy-mapper config from ROS parameters.  Defaults mirror the
-  // standalone `mapping` package so the SLAM map looks the same as the live mapper.
+  // Occupancy-mapper config from ROS parameters; defaults mirror the `mapping` package.
   OccupancyMapper::Config loadMapConfig()
   {
     OccupancyMapper::Config cfg;
@@ -196,10 +188,8 @@ private:
       RCLCPP_INFO_ONCE(get_logger(), "First odometry received.");
     }
 
-    // Publish the live SLAM pose here, at odom rate: it is the latched map -> odom
-    // correction composed with the freshest odom sample, so it is as smooth and
-    // up-to-date as the odometry itself.  Before the first keyframe the correction
-    // is identity, so this correctly reads map == odom.
+    // Live pose = latched correction composed with the freshest odom, so it stays
+    // smooth at odom rate (identity correction before the first keyframe).
     publishEstimatedPose(odom_buffer_.back().pose, msg->header.stamp);
   }
 
@@ -221,9 +211,8 @@ private:
       const KeyframeResult outcome = slam_.addKeyframe(scan_odom_pose, *msg);
       last_keyframe_odom_pose_ = scan_odom_pose;
 
-      // Update the occupancy map.  On a loop closure the optimizer rewrote every past
-      // node pose, so the whole grid must be rebuilt; otherwise just fold in the new
-      // keyframe's scan at its (already CSM-corrected) pose.
+      // Loop closure rewrites every past pose, so rebuild the whole grid;
+      // otherwise just fold in the new keyframe's scan.
       if (outcome.loop_closed) {
         rebuildMap();
       } else {
@@ -231,41 +220,24 @@ private:
       }
       publishMap(msg->header.stamp);
 
-      // Recompute the map -> odom correction from the latest corrected SLAM pose
-      // and the raw odom at this same keyframe.
       updateMapToOdom(slam_.estimatedPose(), scan_odom_pose);
-      publishPaths(scan_odom_pose, msg->header.stamp);
+      publishPoseGraph(msg->header.stamp);
     }
 
-    // Broadcast on every scan (not just keyframes) so the map -> odom branch of the
-    // TF tree never goes stale between keyframes.  The correction itself only
-    // changes at keyframes; here we just re-stamp it with the current scan time.
+    // Re-broadcast every scan so the map -> odom TF never goes stale between
+    // keyframes; the correction itself only changes when a keyframe is added.
     broadcastMapToOdom(msg->header.stamp);
   }
 
   // ---------------------------------------------------------------------------
-  // Path publishing
+  // Pose-graph (keyframe trajectory) publishing
   // ---------------------------------------------------------------------------
 
-  void publishPaths(
-    const Pose2D & odom_pose,
-    const builtin_interfaces::msg::Time & stamp)
+  void publishPoseGraph(const builtin_interfaces::msg::Time & stamp)
   {
-    // Odom path: append the raw odometry pose — odom never changes retroactively.
-    geometry_msgs::msg::PoseStamped odom_stamped;
-    odom_stamped.header.stamp = stamp;
-    odom_stamped.header.frame_id = "odom";
-    odom_stamped.pose.position.x = odom_pose.x;
-    odom_stamped.pose.position.y = odom_pose.y;
-    odom_stamped.pose.orientation = yawToQuaternion(odom_pose.theta);
-    odom_path_.poses.push_back(odom_stamped);
-    odom_path_.header.stamp = stamp;
-    odom_path_pub_->publish(odom_path_);
-
-    // SLAM path: rebuild entirely from graph node poses every keyframe.
-    // The optimizer corrects node poses in-place, so a rebuild automatically
-    // reflects any loop closure corrections — even for past keyframes.
-    slam_path_.poses.clear();
+    // Rebuilt from node poses each time so loop-closure corrections to past
+    // keyframes are reflected automatically.
+    pose_graph_.poses.clear();
     for (int i = 0; i < slam_.graph().nodeCount(); ++i) {
       const auto & node = slam_.graph().getNode(i);
       geometry_msgs::msg::PoseStamped ps;
@@ -274,20 +246,17 @@ private:
       ps.pose.position.x = node.pose.x;
       ps.pose.position.y = node.pose.y;
       ps.pose.orientation = yawToQuaternion(node.pose.theta);
-      slam_path_.poses.push_back(ps);
+      pose_graph_.poses.push_back(ps);
     }
-    slam_path_.header.stamp = stamp;
-    slam_path_pub_->publish(slam_path_);
+    pose_graph_.header.stamp = stamp;
+    pose_graph_pub_->publish(pose_graph_);
   }
 
   // ---------------------------------------------------------------------------
   // Occupancy mapping
   // ---------------------------------------------------------------------------
-  // Each keyframe stores its raw scan and its (optimizable) world pose.  The map is
-  // just every scan ray-traced at its node's current pose.  Between loop closures we
-  // fold in only the newest scan; after a loop closure the optimizer has moved every
-  // past pose, so we clear and replay all scans — the map snaps onto the corrected
-  // trajectory and any drift-induced double walls collapse together.
+  // The map is every keyframe's raw scan ray-traced at its node's current pose.
+  // Incremental between keyframes; full rebuild after a loop closure moves the poses.
 
   // Fold the most recently added keyframe's scan into the existing grid.
   void integrateLatestKeyframe()
@@ -319,12 +288,9 @@ private:
   // ---------------------------------------------------------------------------
   // map -> odom transform
   // ---------------------------------------------------------------------------
-  // The robot's pose is known in two frames at the same instant:
-  //   map  -> base_link : the corrected SLAM pose      (slam_pose)
-  //   odom -> base_link : the raw wheel odometry        (odom_pose)
-  // We publish map -> odom so the two are consistent:
-  //   map_to_odom = map_to_base * inverse(odom_to_base)
-  // This is the standard SLAM correction: it absorbs all accumulated odom drift.
+  // The robot pose is known in two frames at once: corrected (map->base) and raw
+  // odom (odom->base). Publishing map->odom = map_to_base * inverse(odom_to_base)
+  // makes them consistent and absorbs accumulated odom drift.
 
   void updateMapToOdom(const Pose2D & slam_pose, const Pose2D & odom_pose)
   {
@@ -353,9 +319,7 @@ private:
     tf_broadcaster_->sendTransform(msg);
   }
 
-  // Live robot pose in the map frame:  map_to_base = map_to_odom * odom_to_base.
-  // The correction (map_to_odom_) is latched at keyframes; odom_pose updates every
-  // scan, so the published pose moves smoothly between keyframes.
+  // Live robot pose in the map frame: map_to_base = map_to_odom * odom_to_base.
   void publishEstimatedPose(const Pose2D & odom_pose, const builtin_interfaces::msg::Time & stamp)
   {
     tf2::Transform odom_to_base;
@@ -388,16 +352,14 @@ private:
   Pose2D last_keyframe_odom_pose_{};
   bool have_first_odom_{false};
 
-  nav_msgs::msg::Path slam_path_{};
-  nav_msgs::msg::Path odom_path_{};
+  nav_msgs::msg::Path pose_graph_{};
 
   // Latest map -> odom correction; updated at keyframes, re-broadcast every scan.
   tf2::Transform map_to_odom_{};
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr slam_path_pub_;
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr odom_path_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pose_graph_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr estimated_pose_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
