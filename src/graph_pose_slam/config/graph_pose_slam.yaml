@@ -33,7 +33,7 @@ graph_pose_slam_node:
     lc_min_skip: 5                      # skip this many recent sequential neighbors
     lc_csm_search_xy_range: 0.50        # wider than sequential — drift offsets the initial guess
     lc_csm_search_theta_range: 0.50     # ~29 degrees
-    lc_min_score: 0.90                  # CSM score required to confirm a loop closure
+    lc_min_score: 0.85                  # CSM score required to confirm a loop closure
 
     # Occupancy map — log-odds grid built from keyframe scans at their optimized poses.
     # Defaults mirror the standalone `mapping` package so both maps look the same.

@@ -44,8 +44,6 @@ struct GraphPoseSlamParameters
 // Per-stage timings (milliseconds) for one addKeyframe call, for profiling.
 struct KeyframeTiming
 {
-  double extract_ms{0.0};           // scan → points
-  double local_map_ms{0.0};         // stitch the local map
   double sequential_match_ms{0.0};  // sequential CSM
   double loop_search_ms{0.0};       // loop-closure candidate search (all candidates)
   int    loop_candidates{0};        // candidates that passed the spatial filter and ran CSM

@@ -61,12 +61,10 @@ KeyframeResult GraphPoseSlam::addKeyframe(
   const Pose2D & odom_pose,
   const sensor_msgs::msg::LaserScan & scan)
 {
-  const auto t_extract = std::chrono::steady_clock::now();
   const std::vector<Point2D> current_points = scan_matcher_.extractPoints(scan);
 
   KeyframeResult outcome;
   ScanMatchResult & result = outcome.scan_match;
-  outcome.timing.extract_ms = elapsedMs(t_extract);
 
   if (has_keyframes_) {
     // Odom delta is the initial guess; the matcher searches a small window around it.
@@ -75,9 +73,7 @@ KeyframeResult GraphPoseSlam::addKeyframe(
     // Match against a local map (last N keyframes stitched into the previous
     // keyframe's frame), not just the previous scan — far less drift per step.
     const int prev_id = graph_.nodeCount() - 1;
-    const auto t_local = std::chrono::steady_clock::now();
     const std::vector<Point2D> local_map = buildLocalMap(prev_id, params_.local_map_size);
-    outcome.timing.local_map_ms = elapsedMs(t_local);
 
     const auto t_match = std::chrono::steady_clock::now();
     result = scan_matcher_.match(local_map, current_points, odom_delta);

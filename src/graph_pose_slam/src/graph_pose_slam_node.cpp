@@ -237,22 +237,17 @@ private:
 
       // Loop closure rewrites every past pose, so rebuild the whole grid;
       // otherwise just fold in the new keyframe's scan.
-      const auto t_map = std::chrono::steady_clock::now();
       if (outcome.loop_closed) {
         rebuildMap();
       } else {
         integrateLatestKeyframe();
       }
-      const double map_ms = elapsedMs(t_map);
-
-      const auto t_publish = std::chrono::steady_clock::now();
       publishMap(msg->header.stamp);
-      const double publish_ms = elapsedMs(t_publish);
 
       updateMapToOdom(slam_.estimatedPose(), scan_odom_pose);
       publishPoseGraph(msg->header.stamp);
 
-      logKeyframeTiming(outcome, map_ms, publish_ms, elapsedMs(t_keyframe));
+      logKeyframeTiming(outcome, elapsedMs(t_keyframe));
     }
 
     // Re-broadcast every scan so the map -> odom TF never goes stale between
@@ -260,23 +255,19 @@ private:
     broadcastMapToOdom(msg->header.stamp);
   }
 
-  // One consolidated timing line per keyframe (addKeyframe stages + map + publish).
-  void logKeyframeTiming(
-    const KeyframeResult & outcome, double map_ms, double publish_ms, double total_ms)
+  // One consolidated timing line per keyframe.
+  void logKeyframeTiming(const KeyframeResult & outcome, double total_ms)
   {
     const auto & t = outcome.timing;
     RCLCPP_INFO(
       get_logger(),
-      "keyframe %d: total=%.1fms | extract=%.1f localmap=%.1f csm=%.1f(%.2f %s) "
-      "lc=%.1f(%d cand%s) opt=%.1f | map=%.1f(%s) pub=%.1f | %d nodes %d edges",
+      "keyframe %d: total=%.1fms  csm=%.1f(%.2f %s)  lc=%.1f(%d cand)  opt=%.1f%s",
       slam_.graph().nodeCount() - 1, total_ms,
-      t.extract_ms, t.local_map_ms,
       t.sequential_match_ms, outcome.scan_match.score,
       outcome.scan_match.matched ? "MATCH" : "odom",
-      t.loop_search_ms, t.loop_candidates, outcome.loop_closed ? " CLOSED" : "",
+      t.loop_search_ms, t.loop_candidates,
       t.optimize_ms,
-      map_ms, outcome.loop_closed ? "rebuild" : "incr", publish_ms,
-      slam_.graph().nodeCount(), slam_.graph().edgeCount());
+      outcome.loop_closed ? "  [LC applied]" : "");
   }
 
   // ---------------------------------------------------------------------------
