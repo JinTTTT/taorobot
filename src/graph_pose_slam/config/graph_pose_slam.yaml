@@ -1,0 +1,50 @@
+graph_pose_slam_node:
+  ros__parameters:
+    # Minimum motion since the last keyframe required to accept a new one.
+    # Larger spacing → the fixed CSM grid quantization error (1 cm / 1°) becomes
+    # a smaller fraction of the total motion → less accumulated zig-zag.
+    # Tested in simulation: 0.40 m gave visibly smoother path than 0.10 m.
+    min_translation_for_keyframe: 0.40   # metres — rotation-only keyframes are never created
+
+    # Sequential matching reference: how many recent keyframes are stitched into the
+    # local map the new scan is matched against. 1 = plain scan-to-scan; larger reduces
+    # per-step drift by giving the matcher more structure to lock onto.
+    local_map_size: 5
+
+    # Correlative scan matching — same likelihood field used for both sequential and loop closure.
+    # Grid resolution is 0.05 m; values below that clamp to binary (on-wall=1.0, else=0.0).
+    csm_likelihood_max_dist: 0.10        # metres — strict: point must be within 10 cm of a wall
+    # Coarse-to-fine search: a coarse pass over the full window, then a fine pass in a
+    # ±coarse-step box around the winner. The coarse steps must stay within the field's
+    # blur (likelihood_max_dist): xy_coarse ≤ that, theta_coarse bounded by far points.
+    csm_search_xy_range: 0.20            # search ±20 cm around odom guess
+    csm_search_xy_step: 0.01             # fine: 1 cm
+    csm_search_xy_coarse_step: 0.05      # coarse: 5 cm (≤ likelihood_max_dist)
+    csm_search_theta_range: 0.3          # search ±~17 degrees
+    csm_search_theta_step: 0.01          # fine: ~0.5 degree
+    csm_search_theta_coarse_step: 0.01   # coarse: bounded by far points (≈ 2·L / max_range)
+    csm_beam_step: 5                     # use every 5th beam when scoring
+    # With likelihood_max_dist=0.10 m the score range drops vs the old 0.50 m field.
+    # 0.65 accepts solid matches while still rejecting genuinely bad alignments.
+    csm_min_score: 0.65                 # score below this → fall back to odometry
+
+    # Loop closure detection
+    lc_search_radius: 2.0               # only check old nodes within this radius (metres)
+    lc_min_skip: 5                      # skip this many recent sequential neighbors
+    lc_csm_search_xy_range: 0.50        # wider than sequential — drift offsets the initial guess
+    lc_csm_search_theta_range: 0.50     # ~29 degrees
+    lc_min_score: 0.85                  # CSM score required to confirm a loop closure
+
+    # Occupancy map — log-odds grid built from keyframe scans at their optimized poses.
+    # Defaults mirror the standalone `mapping` package so both maps look the same.
+    # Incremental per keyframe; full rebuild after each loop closure correction.
+    map_resolution: 0.05                # metres per cell
+    map_width: 500                      # cells  → 25 m across at 0.05 m
+    map_height: 500                     # cells
+    map_origin_x: -12.5                 # metres — grid centred on the start pose (node 0 anchor)
+    map_origin_y: -12.5                 # metres
+    map_hit_probability: 0.70           # inverse-sensor-model occupied update
+    map_free_probability: 0.35          # < 0.5 → negative log-odds along free rays
+    map_log_odds_min: -10.0             # clamp to keep cells correctable
+    map_log_odds_max: 10.0
+    map_publish_unknown_for_unobserved: true   # leave never-seen cells as -1 (unknown) in RViz

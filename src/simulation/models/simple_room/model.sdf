@@ -99,11 +99,11 @@
       <collision name="col"><geometry><box><size>2 0.15 0.5</size></box></geometry></collision>
       <visual name="vis"><geometry><box><size>2 0.15 0.5</size></box></geometry><material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material></visual>
     </link>
-    <link name="inner_h3">
+    <!-- <link name="inner_h3">
       <pose>4 4 0.25 0 0 0</pose>
       <collision name="col"><geometry><box><size>2 0.15 0.5</size></box></geometry></collision>
       <visual name="vis"><geometry><box><size>2 0.15 0.5</size></box></geometry><material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material></visual>
-    </link>
+    </link> -->
     <link name="inner_h4">
       <pose>0 2 0.25 0 0 0</pose>
       <collision name="col"><geometry><box><size>6 0.15 0.5</size></box></geometry></collision>

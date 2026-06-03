@@ -92,9 +92,11 @@ It publishes `/estimated_pose`, `/estimated_pose_with_covariance`, `/scan_matche
 The scan-matched pose is also used as a Kalman correction measurement when its score and distance gates pass.
 It is a local tracker, so large odometry errors can still make it lose the actual pose.
 
-### `slam`
+### `graph_pose_slam`
 
-This package is the first learning version of SLAM.
+This package is the graph-based pose SLAM. It keeps a graph of keyframes (pose +
+lidar scan), connects them with motion constraints, and runs a g2o pose-graph
+optimizer whenever a loop closure is found.
 
 It reads:
 
@@ -104,26 +106,30 @@ It reads:
 It publishes:
 
 - `/map`
-- `/corrected_map`
+- `/poses_graph`
 - `/estimated_pose`
-- `/scan_matched_pose`
-- `/trajectory`
-- `/corrected_trajectory`
-- `/loop_closure_pose`
 - TF: `map -> odom`
 
 Simple logic:
 
-- predict pose from odometry
-- use local scan matching for small pose correction
-- build a live occupancy-grid map with the shared mapper from `mapping`
-- store trajectory history and keyframes
-- detect loop closure from old keyframes
-- apply a simple evenly spread trajectory correction
-- rebuild a corrected map from corrected keyframes
+- accept a keyframe every fixed translation (rotation-only keyframes are skipped)
+- match each new scan against a local map (the last few keyframes stitched together)
+  with a coarse-to-fine correlative scan matcher
+- add the keyframe to the pose graph with odometry and scan-match edges
+- detect loop closures against nearby old keyframes and add a loop-closure edge
+- run g2o optimization on loop closure, which corrects every node pose at once
+- build a live occupancy map with the shared mapper from `mapping`, and rebuild it
+  from the corrected poses after each loop closure
 
-This SLAM package is good enough as a first learning version.
-It does not yet do full pose graph optimization or robust wall-hit recovery.
+See `src/graph_pose_slam/README.md` for the full design and per-keyframe timing log.
+
+### `slam_fastslam`
+
+This package is a particle-based (FastSLAM) implementation. Each particle carries
+its own pose hypothesis, trajectory, occupancy map, and likelihood field; the node
+publishes the selected particle's map, path, and pose plus the full particle cloud.
+
+See `src/slam_fastslam/README.md` for details.
 
 ### `motion_planning`
 
@@ -366,7 +372,7 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ### 3. Start SLAM
 
 ```bash
-ros2 launch slam simple_slam.launch.py
+ros2 launch graph_pose_slam graph_pose_slam.launch.py
 ```
 
 ### 4. Start RViz
@@ -379,19 +385,15 @@ In RViz:
 
 - set Fixed Frame to `map`
 - add `/map`
-- add `/corrected_map`
+- add `/poses_graph`
 - add `/estimated_pose`
-- add `/trajectory`
-- add `/corrected_trajectory`
-- add `/loop_closure_pose`
 - add `TF`
 
 During normal driving:
 
-- `/map` is the live online map
-- `/corrected_map` is rebuilt from corrected keyframes after loop-closure correction
-- `/trajectory` is the raw path
-- `/corrected_trajectory` is the loop-corrected keyframe path
+- `/map` is the live occupancy map, rebuilt from corrected poses after each loop closure
+- `/poses_graph` is the keyframe trajectory, which self-corrects when the graph is optimized
+- `/estimated_pose` is the live pose (the latched `map -> odom` correction composed with odometry)
 
 ## Run Case 4: Motion Planning and Control
 ### 1. Start simulation
@@ -452,7 +454,8 @@ gazebo_ws/
     ├── simulation/
     ├── mapping/
     ├── localization/
-    ├── slam/
+    ├── graph_pose_slam/
+    ├── slam_fastslam/
     ├── motion_planning/
     └── path_follow_control/
 
@@ -460,4 +463,7 @@ gazebo_ws/
 
 ## Current Issues and Future Improvements
 
-- SLAM still has known limitations in wall-hit / odometry-disagreement cases and does not yet include pose graph optimization.
+- In `graph_pose_slam`, the loop-closure search cost grows with the number of nearby
+  keyframes (it matches against every candidate within the search radius), so it can
+  slow down in heavily revisited areas. Planned mitigations: spatial subsampling of
+  candidates, a loop-closure cooldown, or an asynchronous loop-closure back-end.
