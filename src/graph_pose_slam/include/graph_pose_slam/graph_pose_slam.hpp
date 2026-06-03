@@ -38,6 +38,14 @@ struct GraphPoseSlamParameters
   double lc_min_score{0.85};               // confirmation threshold for loop closure
 };
 
+// Reports what happened when a keyframe was added, so the caller can decide how to
+// update downstream products (e.g. the occupancy map: incremental vs full rebuild).
+struct KeyframeResult
+{
+  ScanMatchResult scan_match{};  // sequential CSM result (transform + score)
+  bool loop_closed{false};       // true if a loop closure fired AND the graph was optimized
+};
+
 class GraphPoseSlam
 {
 public:
@@ -48,7 +56,7 @@ public:
     const Pose2D & last_keyframe_odom,
     const Pose2D & current_odom) const;
 
-  ScanMatchResult addKeyframe(
+  KeyframeResult addKeyframe(
     const Pose2D & odom_pose,
     const sensor_msgs::msg::LaserScan & scan);
 

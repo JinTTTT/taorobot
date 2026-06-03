@@ -10,6 +10,7 @@ find_package(ament_index_cpp REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(g2o REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(mapping REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -55,6 +56,7 @@ target_include_directories(graph_pose_slam_node PUBLIC
 ament_target_dependencies(graph_pose_slam_node
   builtin_interfaces
   geometry_msgs
+  mapping
   nav_msgs
   rclcpp
   sensor_msgs

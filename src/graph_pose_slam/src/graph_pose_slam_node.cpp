@@ -7,6 +7,8 @@
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
+#include "mapping/occupancy_mapper.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -21,6 +23,7 @@ namespace
 
 using graph_pose_slam::GraphPoseSlam;
 using graph_pose_slam::GraphPoseSlamParameters;
+using graph_pose_slam::KeyframeResult;
 using graph_pose_slam::OdomSample;
 using graph_pose_slam::Pose2D;
 using graph_pose_slam::lookupOdomAtStamp;
@@ -36,6 +39,7 @@ public:
   {
     loadParameters();
     slam_.configure(slam_params_);
+    mapper_.configure(loadMapConfig());
 
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/odom",
@@ -50,6 +54,11 @@ public:
     slam_path_pub_ = create_publisher<nav_msgs::msg::Path>("/slam_path", 10);
     odom_path_pub_ = create_publisher<nav_msgs::msg::Path>("/odom_path", 10);
     estimated_pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/estimated_pose", 10);
+
+    // Map QoS: latched (transient_local) so RViz gets the latest grid even if it
+    // subscribes after the map was last published.  The grid only changes at keyframes.
+    map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
+      "/map", rclcpp::QoS(1).transient_local().reliable());
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
@@ -152,6 +161,25 @@ private:
 
   }
 
+  // Build the occupancy-mapper config from ROS parameters.  Defaults mirror the
+  // standalone `mapping` package so the SLAM map looks the same as the live mapper.
+  OccupancyMapper::Config loadMapConfig()
+  {
+    OccupancyMapper::Config cfg;
+    cfg.resolution  = declare_parameter<double>("map_resolution", cfg.resolution);
+    cfg.width       = declare_parameter<int>("map_width", cfg.width);
+    cfg.height      = declare_parameter<int>("map_height", cfg.height);
+    cfg.origin_x    = declare_parameter<double>("map_origin_x", cfg.origin_x);
+    cfg.origin_y    = declare_parameter<double>("map_origin_y", cfg.origin_y);
+    cfg.hit_probability  = declare_parameter<double>("map_hit_probability", cfg.hit_probability);
+    cfg.free_probability = declare_parameter<double>("map_free_probability", cfg.free_probability);
+    cfg.log_odds_min = declare_parameter<double>("map_log_odds_min", cfg.log_odds_min);
+    cfg.log_odds_max = declare_parameter<double>("map_log_odds_max", cfg.log_odds_max);
+    cfg.publish_unknown_for_unobserved =
+      declare_parameter<bool>("map_publish_unknown_for_unobserved", true);
+    return cfg;
+  }
+
   // ---------------------------------------------------------------------------
   // Callbacks
   // ---------------------------------------------------------------------------
@@ -190,8 +218,18 @@ private:
     }
 
     if (slam_.shouldAcceptKeyframe(last_keyframe_odom_pose_, scan_odom_pose)) {
-      slam_.addKeyframe(scan_odom_pose, *msg);
+      const KeyframeResult outcome = slam_.addKeyframe(scan_odom_pose, *msg);
       last_keyframe_odom_pose_ = scan_odom_pose;
+
+      // Update the occupancy map.  On a loop closure the optimizer rewrote every past
+      // node pose, so the whole grid must be rebuilt; otherwise just fold in the new
+      // keyframe's scan at its (already CSM-corrected) pose.
+      if (outcome.loop_closed) {
+        rebuildMap();
+      } else {
+        integrateLatestKeyframe();
+      }
+      publishMap(msg->header.stamp);
 
       // Recompute the map -> odom correction from the latest corrected SLAM pose
       // and the raw odom at this same keyframe.
@@ -240,6 +278,42 @@ private:
     }
     slam_path_.header.stamp = stamp;
     slam_path_pub_->publish(slam_path_);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Occupancy mapping
+  // ---------------------------------------------------------------------------
+  // Each keyframe stores its raw scan and its (optimizable) world pose.  The map is
+  // just every scan ray-traced at its node's current pose.  Between loop closures we
+  // fold in only the newest scan; after a loop closure the optimizer has moved every
+  // past pose, so we clear and replay all scans — the map snaps onto the corrected
+  // trajectory and any drift-induced double walls collapse together.
+
+  // Fold the most recently added keyframe's scan into the existing grid.
+  void integrateLatestKeyframe()
+  {
+    const auto & graph = slam_.graph();
+    if (graph.empty()) {
+      return;
+    }
+    const auto & node = graph.getNode(graph.nodeCount() - 1);
+    mapper_.updateWithScan(node.scan, node.pose.x, node.pose.y, node.pose.theta);
+  }
+
+  // Wipe the grid and replay every keyframe's scan at its optimized pose.
+  void rebuildMap()
+  {
+    mapper_.clear();
+    const auto & graph = slam_.graph();
+    for (int i = 0; i < graph.nodeCount(); ++i) {
+      const auto & node = graph.getNode(i);
+      mapper_.updateWithScan(node.scan, node.pose.x, node.pose.y, node.pose.theta);
+    }
+  }
+
+  void publishMap(const builtin_interfaces::msg::Time & stamp)
+  {
+    map_pub_->publish(mapper_.buildOccupancyGridMsg("map", stamp));
   }
 
   // ---------------------------------------------------------------------------
@@ -308,6 +382,7 @@ private:
 
   GraphPoseSlamParameters slam_params_{};
   GraphPoseSlam slam_{};
+  OccupancyMapper mapper_{};
 
   std::deque<OdomSample> odom_buffer_{};
   Pose2D last_keyframe_odom_pose_{};
@@ -324,6 +399,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr slam_path_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr odom_path_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr estimated_pose_pub_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };
 

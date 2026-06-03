@@ -12,6 +12,7 @@
   <depend>builtin_interfaces</depend>
   <depend>libg2o</depend>
   <depend>geometry_msgs</depend>
+  <depend>mapping</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>

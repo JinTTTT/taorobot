@@ -8,10 +8,11 @@ namespace graph_pose_slam
 int PoseGraph::addNode(
   const Pose2D & pose,
   const Pose2D & odom_pose,
-  const std::vector<Point2D> & points)
+  const std::vector<Point2D> & points,
+  const sensor_msgs::msg::LaserScan & scan)
 {
   const int id = static_cast<int>(nodes_.size());
-  nodes_.push_back(PoseNode{id, pose, odom_pose, points});
+  nodes_.push_back(PoseNode{id, pose, odom_pose, points, scan});
   return id;
 }
 

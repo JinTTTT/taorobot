@@ -24,3 +24,17 @@ graph_pose_slam_node:
     lc_csm_search_xy_range: 0.50        # wider than sequential — drift offsets the initial guess
     lc_csm_search_theta_range: 0.50     # ~29 degrees
     lc_min_score: 0.85                  # CSM score required to confirm a loop closure
+
+    # Occupancy map — log-odds grid built from keyframe scans at their optimized poses.
+    # Defaults mirror the standalone `mapping` package so both maps look the same.
+    # Incremental per keyframe; full rebuild after each loop closure correction.
+    map_resolution: 0.05                # metres per cell
+    map_width: 500                      # cells  → 25 m across at 0.05 m
+    map_height: 500                     # cells
+    map_origin_x: -12.5                 # metres — grid centred on the start pose (node 0 anchor)
+    map_origin_y: -12.5                 # metres
+    map_hit_probability: 0.70           # inverse-sensor-model occupied update
+    map_free_probability: 0.35          # < 0.5 → negative log-odds along free rays
+    map_log_odds_min: -10.0             # clamp to keep cells correctable
+    map_log_odds_max: 10.0
+    map_publish_unknown_for_unobserved: true   # leave never-seen cells as -1 (unknown) in RViz

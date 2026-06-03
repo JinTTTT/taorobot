@@ -44,13 +44,14 @@ bool GraphPoseSlam::shouldAcceptKeyframe(
   return std::hypot(dx, dy) >= params_.min_translation_for_keyframe;
 }
 
-ScanMatchResult GraphPoseSlam::addKeyframe(
+KeyframeResult GraphPoseSlam::addKeyframe(
   const Pose2D & odom_pose,
   const sensor_msgs::msg::LaserScan & scan)
 {
   const std::vector<Point2D> current_points = scan_matcher_.extractPoints(scan);
 
-  ScanMatchResult result;
+  KeyframeResult outcome;
+  ScanMatchResult & result = outcome.scan_match;
 
   if (has_keyframes_) {
     // Use the odom delta as the initial guess.
@@ -78,7 +79,7 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
     };
 
     // Insert the new keyframe into the pose graph.
-    const int new_id = graph_.addNode(estimated_pose_, odom_pose, current_points);
+    const int new_id = graph_.addNode(estimated_pose_, odom_pose, current_points, scan);
     const int prev_id = new_id - 1;
 
     // Odometry edge: always added — cheap but drifts.
@@ -139,6 +140,7 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
         // estimated_pose_ to the latest node's corrected position.
         const auto t_opt = std::chrono::steady_clock::now();
         if (optimizer_.optimize(graph_)) {
+          outcome.loop_closed = true;
           const double opt_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t_opt).count();
           estimated_pose_ = graph_.getNode(new_id).pose;
@@ -157,14 +159,14 @@ ScanMatchResult GraphPoseSlam::addKeyframe(
     // odom path start at exactly the same point in RViz, so any later divergence
     // is a real and visible correction, not just a coordinate-frame offset.
     estimated_pose_ = odom_pose;
-    graph_.addNode(estimated_pose_, odom_pose, current_points);
+    graph_.addNode(estimated_pose_, odom_pose, current_points, scan);
   }
 
   prev_keyframe_points_ = current_points;
   prev_keyframe_odom_   = odom_pose;
   has_keyframes_        = true;
 
-  return result;
+  return outcome;
 }
 
 Pose2D GraphPoseSlam::estimatedPose() const

@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "graph_pose_slam/types.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 
 namespace graph_pose_slam
 {
@@ -13,7 +14,11 @@ struct PoseNode
   int id{-1};
   Pose2D pose{};       // best estimated world pose (updated by optimizer later)
   Pose2D odom_pose{};  // raw wheel odometry at this keyframe (never changes)
-  std::vector<Point2D> points{};  // lidar hit points in sensor-local frame
+  std::vector<Point2D> points{};  // lidar hit points in sensor-local frame (used by CSM)
+  // Raw lidar scan, kept so the occupancy map can be rebuilt from optimized poses.
+  // Unlike `points` (hits only), the raw scan also encodes miss beams, which carve
+  // out free space during ray-tracing — essential for a consistent occupancy grid.
+  sensor_msgs::msg::LaserScan scan{};
 };
 
 // What kind of measurement produced this edge.
@@ -47,7 +52,8 @@ public:
   int addNode(
     const Pose2D & pose,
     const Pose2D & odom_pose,
-    const std::vector<Point2D> & points);
+    const std::vector<Point2D> & points,
+    const sensor_msgs::msg::LaserScan & scan);
 
   // Append a directed constraint edge between two existing nodes.
   void addEdge(
