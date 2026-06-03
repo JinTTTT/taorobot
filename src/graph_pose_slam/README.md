@@ -85,3 +85,15 @@ Publications:
 - `/poses_graph`
 - `/estimated_pose`
 - `map -> odom` (TF)
+
+## Known Limitations
+
+- **Loop-closure search scales with revisits.** Each keyframe runs a scan match against
+  every old node within `lc_search_radius`. In a heavily revisited area, many keyframes
+  fall inside that radius, so the per-keyframe loop-closure time grows (the timing log
+  shows the `lc=...(N cand)` count climbing). The per-match cost is already minimized by
+  the coarse-to-fine search; the remaining cost is the candidate *count*. Planned
+  mitigations: spatial subsampling (one candidate per coarse cell), a loop-closure
+  cooldown, or moving loop closure to an asynchronous back-end thread.
+- **Open-corridor drift.** Long featureless corridors give no along-corridor constraint
+  (the aperture problem), so drift there is only corrected once a loop is closed.
