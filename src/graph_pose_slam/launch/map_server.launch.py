@@ -52,7 +52,12 @@ def generate_launch_description():
         name="map_server",
         namespace="",
         output="screen",
-        parameters=[{"yaml_filename": LaunchConfiguration("map")}],
+        parameters=[{
+            "yaml_filename": LaunchConfiguration("map"),
+            # No nav2_lifecycle_manager runs here, so disable the bond the node
+            # would otherwise try (and fail) to create to one. 0.0 = bond off.
+            "bond_heartbeat_period": 0.0,
+        }],
     )
 
     # Step 1: configure the node as soon as it launches.
