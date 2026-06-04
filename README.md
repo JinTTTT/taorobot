@@ -1,16 +1,39 @@
-# Simple Mobile Robot Software Stack: Simulation, Mapping, Localization, SLAM, Planning, and Control
+<div align="center">
 
-This repo is my place to learn the full software stack of a mobile robot.
+# 🤖 taorobot
 
-The long term goal is to learn:
+**The way to build a mobile robot from scratch — every layer, no black boxes.**
 
-- simulation: finished
-- mapping: finished
-- localization : finished
-- SLAM : finished
-- motion planning : finished
-- path follow control : finished
-- navigation : in progress
+[![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-blue)](https://docs.ros.org/en/humble/)
+[![Gazebo](https://img.shields.io/badge/Sim-Gazebo-orange)](https://gazebosim.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+
+![taorobot planning a path and driving to a goal](docs/media/hero.gif)
+
+</div>
+
+A complete mobile-robot software stack — **mapping, localization, SLAM,
+planning, and control — all written from scratch** in ROS 2 and Gazebo.
+
+Most robotics tutorials hand you Nav2 and SLAM Toolbox as black boxes.
+This one doesn't. Every algorithm here is implemented by hand so you can
+read it, run it, break it, and actually understand how a robot thinks.
+
+> 🎓 Built as a learn-in-public project. If you're learning robotics too,
+> issues, questions, and pull requests are genuinely welcome.
+
+## What you'll learn
+
+- 🗺️ **Mapping** — build an occupancy grid with Bresenham ray-tracing + log-odds
+- 📍 **Localization** — particle filter and Kalman filter, from the math up
+- 🧭 **SLAM** — pose-graph SLAM with loop closure (plus a FastSLAM variant)
+- 🛣️ **Planning** — A* global planner with obstacle inflation + path smoothing
+- 🚗 **Control** — pure-pursuit path follower publishing `/cmd_vel`
+
+## Quick links
+
+[Quick Start](#quick-start) · [How it works](docs/) · [Roadmap](#roadmap) · [Contributing](CONTRIBUTING.md)
 
 ## Packages
 
