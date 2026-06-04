@@ -32,6 +32,21 @@ void ParticleFilter::initializeUniform(const nav_msgs::msg::OccupancyGrid & map)
     }
 }
 
+void ParticleFilter::initializeGaussian(
+    double x, double y, double theta, double std_xy, double std_theta)
+{
+    std::normal_distribution<double> xy_noise(0.0, std_xy);
+    std::normal_distribution<double> theta_noise(0.0, std_theta);
+
+    const double uniform_weight = 1.0 / std::max(1, parameters_.num_particles);
+    for (auto & p : particles_) {
+        p.x = x + xy_noise(rng_);
+        p.y = y + xy_noise(rng_);
+        p.theta = normalizeAngle(theta + theta_noise(rng_));
+        p.weight = uniform_weight;
+    }
+}
+
 void ParticleFilter::buildLikelihoodField(const nav_msgs::msg::OccupancyGrid & map)
 {
     likelihood_field_.build(map, parameters_.likelihood_max_distance);

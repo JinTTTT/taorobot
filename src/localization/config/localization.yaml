@@ -1,11 +1,21 @@
 particle_filter_localization_node:
   ros__parameters:
-    num_particles: 500
+    num_particles: 300
     random_seed: 42
+    # Seed particles around an /initialpose (RViz "2D Pose Estimate"). These are
+    # the 1-sigma spread of the initial-pose guess; used once per pose estimate.
+    initial_pose_std_xy: 0.3       # metres
+    initial_pose_std_theta: 0.17   # radians (~10 deg)
     likelihood_max_distance: 1.0
     scan_beam_step: 10
     motion_update_min_translation: 0.001
     motion_update_min_rotation: 0.001
+    # AMCL-style measurement-update gate: only run the scan likelihood model and
+    # resampling after the robot has moved this far since the last update. While
+    # (near) static the cloud is held still and the estimate/TF are just
+    # re-broadcast — prevents standing-still jitter. Defaults match AMCL.
+    update_min_translation: 0.20   # metres
+    update_min_rotation: 0.52      # radians (~pi/6)
     translation_noise_from_translation: 0.02
     translation_noise_base: 0.005
     rotation_noise_from_rotation: 0.05

@@ -59,6 +59,12 @@ public:
 
     void initializeUniform(const nav_msgs::msg::OccupancyGrid & map);
 
+    // Seed all particles from a Gaussian around a known pose (e.g. RViz
+    // "2D Pose Estimate"). std_xy / std_theta are the 1-sigma spread of the
+    // initial-pose uncertainty.
+    void initializeGaussian(double x, double y, double theta,
+                            double std_xy, double std_theta);
+
     void buildLikelihoodField(const nav_msgs::msg::OccupancyGrid & map);
 
     void sampleMotionModel(double old_x, double old_y, double old_theta,

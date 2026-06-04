@@ -5,6 +5,7 @@
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/pose.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Transform.h>
@@ -29,6 +30,8 @@ private:
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
+    void initialPoseCallback(
+        const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
 
     ParticleFilterParameters loadParticleFilterParameters();
     void publishParticles();
@@ -39,6 +42,8 @@ private:
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
+        initial_pose_sub_;
 
     // Publisher
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particle_pub_;
@@ -58,9 +63,28 @@ private:
     double last_odom_y_     = 0.0;
     double last_odom_theta_ = 0.0;
     bool   odom_initialized_ = false;
-    bool   particles_moved_since_last_resample_ = false;
     double motion_update_min_translation_ = 0.001;
     double motion_update_min_rotation_ = 0.001;
+
+    // AMCL-style measurement-update gate: the scan likelihood model and
+    // resampling only run after the robot has moved past these thresholds
+    // since the last update. While the robot is (near) static the cloud is
+    // held still and we just re-broadcast the existing estimate / TF.
+    double update_min_translation_ = 0.20;   // metres
+    double update_min_rotation_    = 0.52;    // radians (~pi/6)
+    double last_update_odom_x_     = 0.0;
+    double last_update_odom_y_     = 0.0;
+    double last_update_odom_theta_ = 0.0;
+    bool   did_first_update_       = false;
+
+    // The filter stays idle (no scan scoring / resampling, no pose output) until
+    // an initial pose is provided via RViz "2D Pose Estimate" (/initialpose).
+    bool   initial_pose_received_  = false;
+
+    // 1-sigma spread used to seed particles around an /initialpose (RViz
+    // "2D Pose Estimate"). These describe the initial-pose uncertainty.
+    double initial_pose_std_xy_    = 0.3;
+    double initial_pose_std_theta_ = 0.17;
 
     ParticleFilter pf_;
 };
@@ -73,6 +97,14 @@ ParticleFilterLocalizationNode::ParticleFilterLocalizationNode()
         this->declare_parameter<double>("motion_update_min_translation", 0.001);
     motion_update_min_rotation_ =
         this->declare_parameter<double>("motion_update_min_rotation", 0.001);
+    update_min_translation_ =
+        this->declare_parameter<double>("update_min_translation", 0.20);
+    update_min_rotation_ =
+        this->declare_parameter<double>("update_min_rotation", 0.52);
+    initial_pose_std_xy_ =
+        this->declare_parameter<double>("initial_pose_std_xy", 0.3);
+    initial_pose_std_theta_ =
+        this->declare_parameter<double>("initial_pose_std_theta", 0.17);
 
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -93,6 +125,15 @@ ParticleFilterLocalizationNode::ParticleFilterLocalizationNode()
     scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
         "/scan", 10,
         std::bind(&ParticleFilterLocalizationNode::scanCallback, this, std::placeholders::_1));
+
+    // RViz "2D Pose Estimate" publishes here with the default (volatile,
+    // reliable) QoS, so match that — a transient_local subscription would be
+    // QoS-incompatible with RViz's publisher and never connect.
+    initial_pose_sub_ =
+        this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+            "/initialpose", 10,
+            std::bind(&ParticleFilterLocalizationNode::initialPoseCallback, this,
+                      std::placeholders::_1));
 
     particle_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>("/particlecloud", 10);
     estimated_pose_pub_ =
@@ -178,10 +219,14 @@ void ParticleFilterLocalizationNode::mapCallback(const nav_msgs::msg::OccupancyG
     map_ = *msg;
     map_received_ = true;
     pf_.buildLikelihoodField(map_);
+    // Populate the free-cell list (used later for recovery sampling). Particles
+    // are scattered here but the filter stays idle until an initial pose is
+    // given via RViz "2D Pose Estimate" (/initialpose).
     pf_.initializeUniform(map_);
     likelihood_field_pub_->publish(pf_.likelihoodFieldMap());
     RCLCPP_INFO(this->get_logger(),
-        "Map received: %d x %d cells. Likelihood field built. Particles initialised.",
+        "Map received: %d x %d cells. Likelihood field built. "
+        "Waiting for initial pose — set it in RViz with '2D Pose Estimate'.",
         msg->info.width, msg->info.height);
 }
 
@@ -201,6 +246,15 @@ void ParticleFilterLocalizationNode::odomCallback(const nav_msgs::msg::Odometry:
         return;
     }
 
+    // Idle until an initial pose is given: keep tracking odom so the motion
+    // gate is anchored when the pose arrives, but do not move the particles.
+    if (!initial_pose_received_) {
+        last_odom_x_     = x;
+        last_odom_y_     = y;
+        last_odom_theta_ = theta;
+        return;
+    }
+
     // Only update if the robot actually moved (avoids jitter when still)
     double dx = x - last_odom_x_;
     double dy = y - last_odom_y_;
@@ -212,7 +266,6 @@ void ParticleFilterLocalizationNode::odomCallback(const nav_msgs::msg::Odometry:
     }
 
     pf_.sampleMotionModel(last_odom_x_, last_odom_y_, last_odom_theta_, x, y, theta);
-    particles_moved_since_last_resample_ = true;
 
     last_odom_x_     = x;
     last_odom_y_     = y;
@@ -226,6 +279,33 @@ void ParticleFilterLocalizationNode::odomCallback(const nav_msgs::msg::Odometry:
 void ParticleFilterLocalizationNode::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
     if (!map_received_) return;
+    if (!initial_pose_received_) {
+        RCLCPP_INFO_THROTTLE(
+            this->get_logger(), *this->get_clock(), 2000,
+            "Waiting for initial pose — set it in RViz with '2D Pose Estimate'.");
+        return;
+    }
+    if (!odom_initialized_) return;  // need an odom reference before gating on motion
+
+    // AMCL-style gate: only run the scan likelihood model + resample after the
+    // robot has moved far enough since the last update (or for the very first
+    // update). While static, hold the cloud and just re-broadcast the TF so it
+    // does not go stale — this stops the standing-still jitter and the
+    // continuous recovery re-scattering.
+    double moved_translation = std::hypot(
+        last_odom_x_ - last_update_odom_x_,
+        last_odom_y_ - last_update_odom_y_);
+    double moved_rotation = std::abs(
+        normalizeAngle(last_odom_theta_ - last_update_odom_theta_));
+
+    bool moved_enough =
+        moved_translation >= update_min_translation_ ||
+        moved_rotation >= update_min_rotation_;
+
+    if (did_first_update_ && !moved_enough) {
+        publishMapToOdomTf();  // keep TF fresh; estimate unchanged while static
+        return;
+    }
 
     ScanScoreStats stats = pf_.scoreParticlesWithScan(*msg);
     RCLCPP_INFO_THROTTLE(
@@ -238,7 +318,54 @@ void ParticleFilterLocalizationNode::scanCallback(const sensor_msgs::msg::LaserS
         stats.worst_score);
 
     pf_.resample();
-    particles_moved_since_last_resample_ = false;
+
+    // Record the odom pose at this update so the next gate measures motion
+    // accumulated since now.
+    last_update_odom_x_     = last_odom_x_;
+    last_update_odom_y_     = last_odom_y_;
+    last_update_odom_theta_ = last_odom_theta_;
+    did_first_update_       = true;
+
+    publishParticles();
+    publishEstimatedPose();
+    publishMapToOdomTf();
+}
+
+void ParticleFilterLocalizationNode::initialPoseCallback(
+    const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
+{
+    if (!map_received_) {
+        RCLCPP_WARN(this->get_logger(),
+            "Ignoring /initialpose: map not received yet.");
+        return;
+    }
+
+    // RViz publishes the pose in the map frame (its fixed frame). We assume map.
+    if (!msg->header.frame_id.empty() && msg->header.frame_id != "map") {
+        RCLCPP_WARN(this->get_logger(),
+            "/initialpose is in frame '%s', expected 'map'. Using it as-is.",
+            msg->header.frame_id.c_str());
+    }
+
+    double x = msg->pose.pose.position.x;
+    double y = msg->pose.pose.position.y;
+    double theta = tf2::getYaw(msg->pose.pose.orientation);
+
+    pf_.initializeGaussian(
+        x, y, theta, initial_pose_std_xy_, initial_pose_std_theta_);
+
+    // Activate the filter and force an immediate measurement update on the next
+    // scan (do not wait for the robot to move); re-anchor the motion gate.
+    initial_pose_received_  = true;
+    did_first_update_       = false;
+    last_update_odom_x_     = last_odom_x_;
+    last_update_odom_y_     = last_odom_y_;
+    last_update_odom_theta_ = last_odom_theta_;
+
+    RCLCPP_INFO(this->get_logger(),
+        "Initial pose set from /initialpose: x=%.2f y=%.2f theta=%.2f "
+        "(std_xy=%.2f std_theta=%.2f)",
+        x, y, theta, initial_pose_std_xy_, initial_pose_std_theta_);
 
     publishParticles();
     publishEstimatedPose();
