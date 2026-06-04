@@ -21,6 +21,10 @@ particle_filter_localization_node:
     rotation_noise_from_rotation: 0.05
     rotation_noise_from_translation: 0.01
     rotation_noise_base: 0.002
+    # Minimum translation (m) for the heading-of-travel to be trusted in the
+    # odometry motion model. Below this a move is treated as pure rotation, so
+    # noisy odom during an in-place spin does not scatter the particle cloud.
+    min_translation_for_heading: 0.01
     resample_xy_noise_std: 0.02
     resample_theta_noise_std: 0.03
     recovery_score_high: 0.99

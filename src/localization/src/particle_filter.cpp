@@ -62,7 +62,10 @@ void ParticleFilter::sampleMotionModel(
     // 3. rotate to final heading
     double delta_rot1 = 0.0;
     double delta_trans = std::sqrt(std::pow(new_x - old_x, 2) + std::pow(new_y - old_y, 2));
-    if (delta_trans > 1e-6) {
+    // Only derive the heading-of-travel when the robot translated enough for it
+    // to be meaningful; otherwise treat the move as pure rotation (delta_rot1=0)
+    // so odom noise during an in-place spin cannot scatter the cloud.
+    if (delta_trans > parameters_.min_translation_for_heading) {
         delta_rot1 = normalizeAngle(std::atan2(new_y - old_y, new_x - old_x) - old_theta);
     }
     double delta_rot2 = normalizeAngle(new_theta - old_theta - delta_rot1);

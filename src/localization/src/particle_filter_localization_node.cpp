@@ -167,6 +167,8 @@ ParticleFilterParameters ParticleFilterLocalizationNode::loadParticleFilterParam
         this->declare_parameter<double>("rotation_noise_from_translation", 0.01);
     parameters.rotation_noise_base =
         this->declare_parameter<double>("rotation_noise_base", 0.002);
+    parameters.min_translation_for_heading =
+        this->declare_parameter<double>("min_translation_for_heading", 0.01);
     parameters.resample_xy_noise_std =
         this->declare_parameter<double>("resample_xy_noise_std", 0.02);
     parameters.resample_theta_noise_std =

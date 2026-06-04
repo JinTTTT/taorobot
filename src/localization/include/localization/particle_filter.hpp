@@ -18,6 +18,11 @@ struct ParticleFilterParameters {
     double rotation_noise_from_rotation = 0.05;
     double rotation_noise_from_translation = 0.01;
     double rotation_noise_base = 0.002;
+    // Minimum translation (m) for the heading-of-travel (delta_rot1) to be
+    // trustworthy. Below this the move is treated as pure rotation, because
+    // atan2() on near-zero (noisy) translation yields a meaningless direction
+    // that would scatter the particles during in-place spins.
+    double min_translation_for_heading = 0.01;
     double resample_xy_noise_std = 0.02;
     double resample_theta_noise_std = 0.03;
     double recovery_score_high = 0.99;
