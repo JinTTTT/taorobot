@@ -122,6 +122,7 @@ install(DIRECTORY
 install(DIRECTORY
   config
   launch
+  maps
   DESTINATION share/${PROJECT_NAME}
 )
 

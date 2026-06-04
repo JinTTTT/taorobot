@@ -14,6 +14,7 @@
   <depend>geometry_msgs</depend>
   <depend>mapping</depend>
   <depend>nav_msgs</depend>
+  <exec_depend>nav2_map_server</exec_depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2</depend>

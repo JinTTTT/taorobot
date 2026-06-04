@@ -18,6 +18,64 @@ Or launch it with the package config file:
 ros2 launch graph_pose_slam graph_pose_slam.launch.py
 ```
 
+## Building, Saving, and Serving a Map
+
+The SLAM node already builds the occupancy grid and publishes it on `/map`
+(latched, frame `map`). Producing a reusable map is therefore a
+**scan → save → serve** workflow — no extra mapping code is needed.
+
+### 1. Scan the environment (build the map)
+
+Run, in separate terminals:
+
+```bash
+ros2 launch simulation bringup_simulation.launch.py        # robot, /scan, /odom, /cmd_vel
+ros2 launch graph_pose_slam graph_pose_slam.launch.py      # SLAM: publishes /map, map->odom TF
+rviz2                                                       # Fixed Frame = map, add Map on /map
+ros2 run teleop_twist_keyboard teleop_twist_keyboard       # drive the robot
+```
+
+Drive slowly to cover the whole environment, and **return to an
+already-visited spot to trigger a loop closure** — that is what corrects
+accumulated drift (watch for `[LC applied]` in the node log). The map fills
+in live in RViz.
+
+### 2. Save the map to disk
+
+The node publishes `/map` **only on a keyframe** (after the robot moves
+`min_translation_for_keyframe`, default 0.40 m), and the latched topic only
+exists **while the SLAM node is running**. So, with the SLAM node still
+alive and at least one keyframe created:
+
+```bash
+ros2 run nav2_map_server map_saver_cli -t /map \
+  -f src/graph_pose_slam/maps/slam_map --occ 0.9 --free 0.1
+```
+
+This writes `maps/slam_map.pgm` + `maps/slam_map.yaml`. `--occ/--free` match
+the thresholds used elsewhere in this project (omit them for nav2 defaults
+of 0.65 / 0.25). `map_saver_cli` reads the **live `/map` topic**, not a file;
+if you stop the SLAM node first the latched map disappears and the saver
+fails with `Failed to spin map subscription`.
+
+### 3. Serve a saved map (no SLAM running)
+
+To publish a stored map back onto `/map` for RViz or localization:
+
+```bash
+ros2 launch graph_pose_slam map_server.launch.py
+# or a different map:
+ros2 launch graph_pose_slam map_server.launch.py map:=/abs/path/to/other.yaml
+```
+
+This starts `nav2_map_server`'s `map_server` (a lifecycle node) and drives
+its `configure → activate` transitions straight from the launch file, so no
+`nav2_lifecycle_manager` is required. The map is published latched on `/map`;
+view it in RViz with Fixed Frame `map` and a Map display.
+
+> Do **not** run `map_server.launch.py` and `graph_pose_slam.launch.py` at
+> the same time — both publish `/map`.
+
 ## Package Structure
 
 - `graph_pose_slam_node.cpp`: ROS 2 adapter for parameters, subscriptions,
