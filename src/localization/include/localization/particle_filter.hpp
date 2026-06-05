@@ -14,10 +14,12 @@ struct ParticleFilterParameters {
     double likelihood_max_distance = 1.0;
     std::size_t scan_beam_step = 10;
     // Beam endpoint measurement model (likelihood-field, Thrun "Probabilistic
-    // Robotics"). The per-beam probability is z_hit * exp(-d^2 / 2*sigma^2) +
-    // z_rand, and a particle's weight is the PRODUCT over beams (accumulated as
-    // a sum of logs). z_rand floors each beam so one stray reading cannot zero
-    // out an otherwise-good particle.
+    // Robotics"). The per-beam probability is z_hit * q + z_rand, where q is the
+    // hit probability exp(-d^2 / 2*sigma_hit^2) baked into the likelihood field
+    // at build time. A particle's weight is the PRODUCT over beams (accumulated
+    // as a sum of logs). z_rand floors each beam so one stray reading cannot
+    // zero out an otherwise-good particle. sigma_hit is consumed by the field
+    // build (buildLikelihoodField); z_hit/z_rand are applied in the scorer.
     double measurement_sigma_hit = 0.2;
     double measurement_z_hit = 0.95;
     double measurement_z_rand = 0.05;
@@ -33,14 +35,17 @@ struct ParticleFilterParameters {
     double min_translation_for_heading = 0.01;
     double resample_xy_noise_std = 0.02;
     double resample_theta_noise_std = 0.03;
-    double recovery_score_high = 0.99;
-    double recovery_score_medium = 0.90;
-    double recovery_score_low = 0.80;
-    double recovery_score_min = 0.70;
-    double recovery_fraction_high = 0.0;
-    double recovery_fraction_medium = 0.10;
-    double recovery_fraction_low = 0.30;
-    double recovery_fraction_min = 0.50;
+    // Recovery injection: a linear ramp on the "confident" scan fit (the mean
+    // fit of the best-matching ~20% of particles). The injected fraction is
+    //   clamp((score_high - confident) / (score_high - score_low), 0, 1) * max
+    // so at/above score_high it injects nothing and at/below score_low it
+    // injects max_fraction. The signal is the confident fit (not the
+    // all-particle average) on purpose: random/lost particles never enter the
+    // top cluster, so injecting them cannot drag the signal down and lock the
+    // filter into permanent injection.
+    double recovery_score_high = 0.95;
+    double recovery_score_low = 0.50;
+    double recovery_max_fraction = 0.5;
 };
 
 struct Particle {
@@ -54,6 +59,9 @@ struct ScanScoreStats {
     double best_score;
     double worst_score;
     double average_score;
+    // Mean fit of the best-matching ~20% of particles. Unlike average_score this
+    // is robust to injected/lost particles, so it drives recovery injection.
+    double confident_score;
 };
 
 struct EstimatedPose {
@@ -101,7 +109,9 @@ private:
 
     void rememberFreeCells(const nav_msgs::msg::OccupancyGrid & map);
     Particle sampleRandomFreeParticle();
-    void updateRecoveryFraction(double best_score);
+    // Update the recovery-injection fraction from the confident scan fit of the
+    // latest measurement update (linear ramp, see ParticleFilterParameters).
+    void updateRecoveryFraction(double confident_fit);
     // Recompute the cached pose estimate from the current (freshly scored)
     // particle weights. Must be called while the weights are meaningful, i.e.
     // after scoring and before resampling resets them to uniform.

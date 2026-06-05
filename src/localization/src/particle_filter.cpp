@@ -16,7 +16,7 @@ void ParticleFilter::configure(const ParticleFilterParameters & parameters)
     parameters_ = parameters;
     rng_.seed(parameters_.random_seed);
     particles_.resize(parameters_.num_particles);
-    current_recovery_particle_fraction_ = parameters_.recovery_fraction_high;
+    current_recovery_particle_fraction_ = 0.0;
 }
 
 void ParticleFilter::initializeUniform(const nav_msgs::msg::OccupancyGrid & map)
@@ -49,11 +49,14 @@ void ParticleFilter::initializeGaussian(
     // Seed the cached estimate at the supplied pose so it is meaningful before
     // the first scan update.
     last_estimate_ = EstimatedPose{x, y, normalizeAngle(theta)};
+
+    current_recovery_particle_fraction_ = 0.0;
 }
 
 void ParticleFilter::buildLikelihoodField(const nav_msgs::msg::OccupancyGrid & map)
 {
-    likelihood_field_.build(map, parameters_.likelihood_max_distance);
+    likelihood_field_.build(
+        map, parameters_.likelihood_max_distance, parameters_.measurement_sigma_hit);
 }
 
 void ParticleFilter::sampleMotionModel(
@@ -115,20 +118,19 @@ ScanScoreStats ParticleFilter::scoreParticlesWithScan(const sensor_msgs::msg::La
     stats.best_score = 0.0;
     stats.worst_score = std::numeric_limits<double>::max();
     stats.average_score = 0.0;
+    stats.confident_score = 0.0;
 
     if (!likelihood_field_.hasMap() || particles_.empty()) {
         return stats;
     }
 
     // Beam endpoint likelihood-field model: each particle's weight is the
-    // PRODUCT of per-beam probabilities p_beam = z_hit * exp(-d^2/2*sigma^2) +
-    // z_rand, where d is the distance from the beam endpoint to the nearest
-    // obstacle. The product (a sum of logs) gives exponential separation
-    // between good and bad particles, unlike an arithmetic mean which is nearly
-    // flat. The field stores q = 1 - d/max_distance, so we recover d = (1-q) *
-    // max_distance without rebuilding the field.
-    const double two_sigma_sq =
-        2.0 * parameters_.measurement_sigma_hit * parameters_.measurement_sigma_hit;
+    // PRODUCT of per-beam probabilities p_beam = z_hit * q + z_rand, where q is
+    // the looked-up hit probability exp(-d^2/2*sigma^2) baked into the field at
+    // build time (d = distance from the beam endpoint to the nearest obstacle).
+    // The product (a sum of logs) gives exponential separation between good and
+    // bad particles, unlike an arithmetic mean which is nearly flat. z_rand
+    // floors each beam so one stray reading cannot zero out a particle.
     const double z_hit = parameters_.measurement_z_hit;
     const double z_rand = parameters_.measurement_z_rand;
 
@@ -156,13 +158,11 @@ ScanScoreStats ParticleFilter::scoreParticlesWithScan(const sensor_msgs::msg::La
             double hit_x = p.x + range * std::cos(p.theta + beam_angle);
             double hit_y = p.y + range * std::sin(p.theta + beam_angle);
 
-            double q = likelihood_field_.valueAtWorld(hit_x, hit_y);
-            double d = (1.0 - q) * parameters_.likelihood_max_distance;
-            double gaussian = std::exp(-(d * d) / two_sigma_sq);
-            double p_beam = z_hit * gaussian + z_rand;
+            double q = likelihood_field_.valueAtWorld(hit_x, hit_y);  // exp(-d^2/2*sigma^2)
+            double p_beam = z_hit * q + z_rand;
 
             log_score += std::log(p_beam);
-            quality_sum += gaussian;
+            quality_sum += q;
             used_beams++;
         }
 
@@ -189,7 +189,28 @@ ScanScoreStats ParticleFilter::scoreParticlesWithScan(const sensor_msgs::msg::La
     }
 
     stats.average_score = quality_sum / particles_.size();
-    updateRecoveryFraction(stats.best_score);
+
+    // Confident fit: mean of the top-fraction of per-particle match qualities.
+    // Random/lost particles fall outside this top cluster, so this reflects
+    // whether a coherent good hypothesis exists rather than being dragged down
+    // by the injected recovery particles (which is what makes it a safe signal
+    // to drive injection — see updateRecoveryFraction). nth_element partitions
+    // the highest qualities to the front in O(n); match_quality is no longer
+    // needed afterwards, so reordering it in place is fine.
+    const std::size_t confident_count = std::max<std::size_t>(
+        1, static_cast<std::size_t>(std::ceil(match_quality.size() * 0.20)));
+    std::nth_element(
+        match_quality.begin(),
+        match_quality.begin() + (confident_count - 1),
+        match_quality.end(),
+        [](double a, double b) { return a > b; });
+    double confident_sum = 0.0;
+    for (std::size_t i = 0; i < confident_count; ++i) {
+        confident_sum += match_quality[i];
+    }
+    stats.confident_score = confident_sum / confident_count;
+
+    updateRecoveryFraction(stats.confident_score);
 
     // Recompute the cached estimate now, while the weights are fresh and
     // meaningful (recovery particles that landed badly have low weight and are
@@ -314,42 +335,26 @@ Particle ParticleFilter::sampleRandomFreeParticle()
     return particle;
 }
 
-void ParticleFilter::updateRecoveryFraction(double best_score)
+void ParticleFilter::updateRecoveryFraction(double confident_fit)
 {
-    if (!std::isfinite(best_score)) {
-        current_recovery_particle_fraction_ = parameters_.recovery_fraction_min;
+    if (!std::isfinite(confident_fit)) {
+        current_recovery_particle_fraction_ = parameters_.recovery_max_fraction;
         return;
     }
 
-    if (best_score >= parameters_.recovery_score_high) {
-        current_recovery_particle_fraction_ = parameters_.recovery_fraction_high;
-    } else if (best_score >= parameters_.recovery_score_medium) {
-        const double ratio =
-            (parameters_.recovery_score_high - best_score) /
-            (parameters_.recovery_score_high - parameters_.recovery_score_medium);
-        current_recovery_particle_fraction_ =
-            parameters_.recovery_fraction_high +
-            ratio * (parameters_.recovery_fraction_medium - parameters_.recovery_fraction_high);
-    } else if (best_score >= parameters_.recovery_score_low) {
-        const double ratio =
-            (parameters_.recovery_score_medium - best_score) /
-            (parameters_.recovery_score_medium - parameters_.recovery_score_low);
-        current_recovery_particle_fraction_ =
-            parameters_.recovery_fraction_medium +
-            ratio * (parameters_.recovery_fraction_low - parameters_.recovery_fraction_medium);
-    } else if (best_score >= parameters_.recovery_score_min) {
-        const double ratio =
-            (parameters_.recovery_score_low - best_score) /
-            (parameters_.recovery_score_low - parameters_.recovery_score_min);
-        current_recovery_particle_fraction_ =
-            parameters_.recovery_fraction_low +
-            ratio * (parameters_.recovery_fraction_min - parameters_.recovery_fraction_low);
-    } else {
-        current_recovery_particle_fraction_ = parameters_.recovery_fraction_min;
+    // Linear ramp: inject nothing at/above score_high, ramp up to max_fraction
+    // at/below score_low. Driven by the confident fit, so injected particles
+    // cannot poison the signal and lock the filter into permanent injection.
+    double fraction = 0.0;
+    if (parameters_.recovery_score_high > parameters_.recovery_score_low) {
+        const double ramp = std::clamp(
+            (parameters_.recovery_score_high - confident_fit) /
+            (parameters_.recovery_score_high - parameters_.recovery_score_low),
+            0.0, 1.0);
+        fraction = ramp * parameters_.recovery_max_fraction;
     }
 
-    current_recovery_particle_fraction_ =
-        std::clamp(current_recovery_particle_fraction_, 0.0, 1.0);
+    current_recovery_particle_fraction_ = fraction;
 }
 
 void ParticleFilter::computeWeightedEstimate()

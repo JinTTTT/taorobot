@@ -8,6 +8,7 @@
 void LikelihoodField::build(
     const nav_msgs::msg::OccupancyGrid & map,
     double max_distance_m,
+    double sigma_hit,
     int occupied_threshold)
 {
     field_map_ = map;
@@ -67,9 +68,15 @@ void LikelihoodField::build(
 
     field_map_.data.assign(total_cells, 0);
 
+    // Bake the Gaussian sensor model into the field: store the hit probability
+    // exp(-d^2 / 2*sigma_hit^2) so the scorer can read it as a probability
+    // directly. With sigma_hit ~ 0.2 m the value decays to ~0 well within the
+    // truncation distance, so cells past the BFS frontier correctly store ~0.
+    const double two_sigma_sq = 2.0 * sigma_hit * sigma_hit;
+
     for (int i = 0; i < total_cells; ++i) {
         const double distance_m = distance_to_wall[i] * resolution;
-        const double likelihood = 1.0 - std::min(distance_m / max_distance_m, 1.0);
+        const double likelihood = std::exp(-(distance_m * distance_m) / two_sigma_sq);
         field_map_.data[i] = static_cast<int8_t>(std::round(likelihood * 100.0));
     }
 }

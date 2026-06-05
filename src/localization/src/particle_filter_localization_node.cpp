@@ -181,42 +181,17 @@ ParticleFilterParameters ParticleFilterLocalizationNode::loadParticleFilterParam
         this->declare_parameter<double>("resample_theta_noise_std", 0.03);
     parameters.recovery_score_high =
         std::clamp(
-            this->declare_parameter<double>("recovery_score_high", 0.99),
-            0.0,
-            1.0);
-    parameters.recovery_score_medium =
-        std::clamp(
-            this->declare_parameter<double>("recovery_score_medium", 0.90),
+            this->declare_parameter<double>("recovery_score_high", 0.95),
             0.0,
             1.0);
     parameters.recovery_score_low =
         std::clamp(
-            this->declare_parameter<double>("recovery_score_low", 0.80),
+            this->declare_parameter<double>("recovery_score_low", 0.50),
             0.0,
             1.0);
-    parameters.recovery_score_min =
+    parameters.recovery_max_fraction =
         std::clamp(
-            this->declare_parameter<double>("recovery_score_min", 0.70),
-            0.0,
-            1.0);
-    parameters.recovery_fraction_high =
-        std::clamp(
-            this->declare_parameter<double>("recovery_fraction_high", 0.0),
-            0.0,
-            1.0);
-    parameters.recovery_fraction_medium =
-        std::clamp(
-            this->declare_parameter<double>("recovery_fraction_medium", 0.10),
-            0.0,
-            1.0);
-    parameters.recovery_fraction_low =
-        std::clamp(
-            this->declare_parameter<double>("recovery_fraction_low", 0.30),
-            0.0,
-            1.0);
-    parameters.recovery_fraction_min =
-        std::clamp(
-            this->declare_parameter<double>("recovery_fraction_min", 0.50),
+            this->declare_parameter<double>("recovery_max_fraction", 0.5),
             0.0,
             1.0);
     return parameters;
@@ -320,8 +295,9 @@ void ParticleFilterLocalizationNode::scanCallback(const sensor_msgs::msg::LaserS
         this->get_logger(),
         *this->get_clock(),
         1000,
-        "Particle scan score: best=%.3f average=%.3f worst=%.3f",
+        "Particle scan score: best=%.3f confident=%.3f average=%.3f worst=%.3f",
         stats.best_score,
+        stats.confident_score,
         stats.average_score,
         stats.worst_score);
 

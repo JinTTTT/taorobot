@@ -30,7 +30,7 @@ Each particle is one possible robot position and heading in the map.
 
 At startup, particles are sampled on free map cells.
 As the robot moves, odometry moves every particle with noise.
-When a scan arrives, each particle is scored with a likelihood-field beam model: every selected laser hit is projected into the map, the distance to the nearest occupied cell is looked up, and that distance is passed through a Gaussian. A particle's weight is the product of the per-beam probabilities (accumulated as a sum of logs), so a particle that matches the map on every beam scores exponentially higher than one that matches on only some.
+When a scan arrives, each particle is scored with a likelihood-field beam model: every selected laser hit is projected into the map and its hit probability is looked up from the likelihood field, which stores a Gaussian of the distance to the nearest occupied cell. A particle's weight is the product of the per-beam probabilities (accumulated as a sum of logs), so a particle that matches the map on every beam scores exponentially higher than one that matches on only some.
 The filter then resamples so good pose guesses survive and bad pose guesses disappear.
 It also adds random recovery particles from free map cells when the best scan score drops, so the filter can search again instead of staying confidently wrong.
 
@@ -81,9 +81,9 @@ Disadvantages:
 The current implementation uses:
 
 - Gaussian seeding of particles around an `/initialpose` (RViz "2D Pose Estimate")
-- likelihood field construction from the occupancy grid map (a distance transform)
+- likelihood field construction from the occupancy grid map (Gaussian hit probability per cell)
 - odometry motion model with sampled translation and rotation noise
-- likelihood-field beam scoring: product of per-beam Gaussians using every 10th laser beam
+- likelihood-field beam scoring: product of per-beam hit probabilities using every 10th laser beam
 - scan-score logging for debugging
 - stochastic universal resampling after each scan
 - score-based recovery particle injection from free map cells
@@ -98,18 +98,20 @@ Within that group, higher-weight particles pull the estimate more strongly.
 The estimated heading is averaged with `sin(theta)` and `cos(theta)`.
 This avoids the angle wraparound problem where `179 degrees` and `-179 degrees` are almost the same direction but a normal average would be wrong.
 
-Recovery particles are controlled by the best scan score.
-With the default configuration:
+Recovery particles are controlled by a linear ramp on the **confident** scan fit (the `confident` value in the scan-score log), which is the mean fit of the best-matching ~20% of particles:
 
 ```text
-best score >= 0.85 -> 0% random recovery particles
-best score  = 0.70 -> 5% random recovery particles
-best score  = 0.55 -> 15% random recovery particles
-best score <= 0.40 -> 30% random recovery particles
+fraction = clamp((score_high - confident) / (score_high - score_low), 0, 1) * max_fraction
+
+confident >= score_high (0.95) -> 0% injection
+confident  = 0.90              -> ~5% injection
+confident <= score_low  (0.50) -> max_fraction (50%) injection
 ```
 
-Values between these score points are interpolated smoothly.
-For example, with 300 particles and a 15 percent recovery fraction, about 45 particles are sampled randomly from free map cells.
+The signal is the *confident* fit, not the all-particle `average`, and this distinction matters.
+The `average` includes the injected random particles, which score near zero and drag it down — so an average-based rule forms a feedback loop (injection lowers the average, the low average keeps injection on) and locks the filter into permanent injection even after the pose is found.
+Random and lost particles never enter the top ~20% cluster, so the confident fit reflects whether a good hypothesis exists and cannot be poisoned by the injection itself.
+Once localized the confident fit is ~0.97, so injection drops to 0 and the random particles disappear; if the robot is kidnapped the confident fit collapses and injection scales back up.
 
 The node publishes `map -> odom` with:
 
@@ -139,7 +141,7 @@ Main parameters:
 - measurement-update gate: `0.20 m`, `0.52 rad`
 - resampling position noise: `0.02 m`
 - resampling heading noise: `0.03 rad`
-- recovery score ramp: `0.85 -> 0%`, `0.70 -> 5%`, `0.55 -> 15%`, `0.40 -> 30%`
+- recovery ramp: `score_high = 0.95` (0%), `score_low = 0.50` (max), `max_fraction = 0.5`
 
 The parameter names are:
 
@@ -165,13 +167,8 @@ The parameter names are:
 - `resample_xy_noise_std`
 - `resample_theta_noise_std`
 - `recovery_score_high`
-- `recovery_score_medium`
 - `recovery_score_low`
-- `recovery_score_min`
-- `recovery_fraction_high`
-- `recovery_fraction_medium`
-- `recovery_fraction_low`
-- `recovery_fraction_min`
+- `recovery_max_fraction`
 
 ### Run and Visualize
 
@@ -250,12 +247,10 @@ Current issues:
 
 - the particle filter estimate does not publish covariance
 - global localization can still fail in symmetric map areas
-- recovery from a wrong initial pose is slow, because injection is keyed off the absolute scan score rather than a relative drop in fit
 - the particle cloud can collapse too much after repeated resampling
 
 Potential improvements:
 
 - publish covariance for the particle-filter estimate
-- replace the score-ramp recovery with adaptive (augmented MCL) injection driven by short- and long-term fit averages
 - add a scan-match snap on `/initialpose` to recover from a poor initial guess
 - add tests for map indexing, likelihood lookup, resampling, and angle averaging
