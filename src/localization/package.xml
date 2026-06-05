@@ -3,7 +3,7 @@
 <package format="3">
   <name>localization</name>
   <version>0.0.0</version>
-  <description>Learning package for particle-filter and Kalman-filter localization in ROS 2.</description>
+  <description>Learning package for particle-filter localization in ROS 2.</description>
   <maintainer email="tj19970215@gmail.com">jtao</maintainer>
   <license>MIT</license>
 

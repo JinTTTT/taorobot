@@ -13,6 +13,14 @@ struct ParticleFilterParameters {
     unsigned int random_seed = 42;
     double likelihood_max_distance = 1.0;
     std::size_t scan_beam_step = 10;
+    // Beam endpoint measurement model (likelihood-field, Thrun "Probabilistic
+    // Robotics"). The per-beam probability is z_hit * exp(-d^2 / 2*sigma^2) +
+    // z_rand, and a particle's weight is the PRODUCT over beams (accumulated as
+    // a sum of logs). z_rand floors each beam so one stray reading cannot zero
+    // out an otherwise-good particle.
+    double measurement_sigma_hit = 0.2;
+    double measurement_z_hit = 0.95;
+    double measurement_z_rand = 0.05;
     double translation_noise_from_translation = 0.02;
     double translation_noise_base = 0.005;
     double rotation_noise_from_rotation = 0.05;
@@ -94,6 +102,10 @@ private:
     void rememberFreeCells(const nav_msgs::msg::OccupancyGrid & map);
     Particle sampleRandomFreeParticle();
     void updateRecoveryFraction(double best_score);
+    // Recompute the cached pose estimate from the current (freshly scored)
+    // particle weights. Must be called while the weights are meaningful, i.e.
+    // after scoring and before resampling resets them to uniform.
+    void computeWeightedEstimate();
 
     ParticleFilterParameters parameters_;
     std::vector<Particle> particles_;
@@ -104,4 +116,8 @@ private:
     double map_origin_x_ = 0.0;
     double map_origin_y_ = 0.0;
     double current_recovery_particle_fraction_ = 0.0;
+    // Cached pose estimate. Recomputed from fresh weights at each scan update
+    // and carried forward by the motion model between scans, so estimatePose()
+    // is a cheap, consistent read that does not depend on post-resample weights.
+    EstimatedPose last_estimate_{0.0, 0.0, 0.0};
 };

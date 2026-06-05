@@ -45,6 +45,10 @@ void ParticleFilter::initializeGaussian(
         p.theta = normalizeAngle(theta + theta_noise(rng_));
         p.weight = uniform_weight;
     }
+
+    // Seed the cached estimate at the supplied pose so it is meaningful before
+    // the first scan update.
+    last_estimate_ = EstimatedPose{x, y, normalizeAngle(theta)};
 }
 
 void ParticleFilter::buildLikelihoodField(const nav_msgs::msg::OccupancyGrid & map)
@@ -95,6 +99,14 @@ void ParticleFilter::sampleMotionModel(
         p.y     += noisy_trans * std::sin(p.theta + noisy_rot1);
         p.theta = normalizeAngle(p.theta + noisy_rot1 + noisy_rot2);
     }
+
+    // Carry the cached estimate forward by the noiseless motion. The particle
+    // noise is zero-mean, so the cloud's centre moves by this nominal delta;
+    // this keeps estimatePose() tracking the robot between scan updates, when
+    // the weights are uniform and cannot be used to recompute the estimate.
+    last_estimate_.x += delta_trans * std::cos(last_estimate_.theta + delta_rot1);
+    last_estimate_.y += delta_trans * std::sin(last_estimate_.theta + delta_rot1);
+    last_estimate_.theta = normalizeAngle(last_estimate_.theta + delta_rot1 + delta_rot2);
 }
 
 ScanScoreStats ParticleFilter::scoreParticlesWithScan(const sensor_msgs::msg::LaserScan & scan)
@@ -104,14 +116,33 @@ ScanScoreStats ParticleFilter::scoreParticlesWithScan(const sensor_msgs::msg::La
     stats.worst_score = std::numeric_limits<double>::max();
     stats.average_score = 0.0;
 
-    if (!likelihood_field_.hasMap()) {
+    if (!likelihood_field_.hasMap() || particles_.empty()) {
         return stats;
     }
 
-    double score_sum = 0.0;
+    // Beam endpoint likelihood-field model: each particle's weight is the
+    // PRODUCT of per-beam probabilities p_beam = z_hit * exp(-d^2/2*sigma^2) +
+    // z_rand, where d is the distance from the beam endpoint to the nearest
+    // obstacle. The product (a sum of logs) gives exponential separation
+    // between good and bad particles, unlike an arithmetic mean which is nearly
+    // flat. The field stores q = 1 - d/max_distance, so we recover d = (1-q) *
+    // max_distance without rebuilding the field.
+    const double two_sigma_sq =
+        2.0 * parameters_.measurement_sigma_hit * parameters_.measurement_sigma_hit;
+    const double z_hit = parameters_.measurement_z_hit;
+    const double z_rand = parameters_.measurement_z_rand;
 
-    for (auto & p : particles_) {
-        double particle_score = 0.0;
+    std::vector<double> log_scores(particles_.size(), 0.0);
+    // Interpretable [0,1] match quality (mean per-beam Gaussian), kept separate
+    // from the resampling weight so the recovery thresholds and logging stay on
+    // a stable scale.
+    std::vector<double> match_quality(particles_.size(), 0.0);
+    double max_log_score = -std::numeric_limits<double>::infinity();
+
+    for (std::size_t pi = 0; pi < particles_.size(); ++pi) {
+        const Particle & p = particles_[pi];
+        double log_score = 0.0;
+        double quality_sum = 0.0;
         int used_beams = 0;
 
         for (size_t i = 0; i < scan.ranges.size(); i += parameters_.scan_beam_step) {
@@ -125,26 +156,45 @@ ScanScoreStats ParticleFilter::scoreParticlesWithScan(const sensor_msgs::msg::La
             double hit_x = p.x + range * std::cos(p.theta + beam_angle);
             double hit_y = p.y + range * std::sin(p.theta + beam_angle);
 
-            particle_score += likelihood_field_.valueAtWorld(hit_x, hit_y);
+            double q = likelihood_field_.valueAtWorld(hit_x, hit_y);
+            double d = (1.0 - q) * parameters_.likelihood_max_distance;
+            double gaussian = std::exp(-(d * d) / two_sigma_sq);
+            double p_beam = z_hit * gaussian + z_rand;
+
+            log_score += std::log(p_beam);
+            quality_sum += gaussian;
             used_beams++;
         }
 
-        if (used_beams > 0) {
-            particle_score /= used_beams;
-        }
+        log_scores[pi] = (used_beams > 0) ? log_score : 0.0;
+        match_quality[pi] = (used_beams > 0) ? quality_sum / used_beams : 0.0;
+        max_log_score = std::max(max_log_score, log_scores[pi]);
+    }
 
-        p.weight = particle_score;
-        score_sum += particle_score;
-        stats.best_score = std::max(stats.best_score, particle_score);
-        stats.worst_score = std::min(stats.worst_score, particle_score);
+    // Convert log-scores to weights with the log-sum-exp shift: subtracting the
+    // max pins the best particle at weight 1.0 and keeps the rest as correct
+    // relative weights, avoiding underflow to zero across all particles.
+    double quality_sum = 0.0;
+    for (std::size_t pi = 0; pi < particles_.size(); ++pi) {
+        particles_[pi].weight = std::exp(log_scores[pi] - max_log_score);
+
+        const double quality = match_quality[pi];
+        quality_sum += quality;
+        stats.best_score = std::max(stats.best_score, quality);
+        stats.worst_score = std::min(stats.worst_score, quality);
     }
 
     if (stats.worst_score == std::numeric_limits<double>::max()) {
         stats.worst_score = 0.0;
     }
 
-    stats.average_score = score_sum / particles_.size();
+    stats.average_score = quality_sum / particles_.size();
     updateRecoveryFraction(stats.best_score);
+
+    // Recompute the cached estimate now, while the weights are fresh and
+    // meaningful (recovery particles that landed badly have low weight and are
+    // excluded). resample() will then reset the weights to uniform.
+    computeWeightedEstimate();
 
     return stats;
 }
@@ -217,6 +267,15 @@ void ParticleFilter::resample()
     }
 
     particles_ = new_particles;
+
+    // Resampling encodes the posterior in particle density, so the resampled
+    // set is equally weighted. Resetting to a uniform weight keeps the next
+    // scoring pass clean and prevents the estimate from double-counting weight
+    // (carried-over weight) and density (duplicated particles).
+    const double uniform_weight = 1.0 / std::max(1, parameters_.num_particles);
+    for (auto & p : particles_) {
+        p.weight = uniform_weight;
+    }
 }
 
 void ParticleFilter::rememberFreeCells(const nav_msgs::msg::OccupancyGrid & map)
@@ -293,28 +352,27 @@ void ParticleFilter::updateRecoveryFraction(double best_score)
         std::clamp(current_recovery_particle_fraction_, 0.0, 1.0);
 }
 
-EstimatedPose ParticleFilter::estimatePose() const
+void ParticleFilter::computeWeightedEstimate()
 {
-    EstimatedPose pose;
-    pose.x = 0.0;
-    pose.y = 0.0;
-    pose.theta = 0.0;
-
     if (particles_.empty()) {
-        return pose;
+        return;
     }
 
+    // Average only the best-scoring fraction of particles so scattered recovery
+    // particles (low weight) do not pull the estimate. nth_element partitions
+    // the highest-weight particles to the front in O(n) instead of a full sort.
+    const std::size_t particles_to_average = std::max<std::size_t>(
+        1,
+        static_cast<std::size_t>(std::ceil(particles_.size() * 0.20)));
+
     std::vector<Particle> best_particles = particles_;
-    std::sort(
+    std::nth_element(
         best_particles.begin(),
+        best_particles.begin() + (particles_to_average - 1),
         best_particles.end(),
         [](const Particle & a, const Particle & b) {
             return a.weight > b.weight;
         });
-
-    const std::size_t particles_to_average = std::max<std::size_t>(
-        1,
-        static_cast<std::size_t>(std::ceil(best_particles.size() * 0.20)));
 
     double sum_x = 0.0;
     double sum_y = 0.0;
@@ -348,11 +406,14 @@ EstimatedPose ParticleFilter::estimatePose() const
         sum_weight = static_cast<double>(particles_to_average);
     }
 
-    pose.x = sum_x / sum_weight;
-    pose.y = sum_y / sum_weight;
-    pose.theta = std::atan2(sum_sin, sum_cos);
+    last_estimate_.x = sum_x / sum_weight;
+    last_estimate_.y = sum_y / sum_weight;
+    last_estimate_.theta = std::atan2(sum_sin, sum_cos);
+}
 
-    return pose;
+EstimatedPose ParticleFilter::estimatePose() const
+{
+    return last_estimate_;
 }
 
 const std::vector<Particle> & ParticleFilter::particles() const

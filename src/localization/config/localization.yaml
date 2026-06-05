@@ -8,6 +8,16 @@ particle_filter_localization_node:
     initial_pose_std_theta: 0.17   # radians (~10 deg)
     likelihood_max_distance: 1.0
     scan_beam_step: 10
+    # Beam endpoint measurement model (likelihood field). A particle's weight is
+    # the PRODUCT over beams of z_hit * exp(-d^2 / 2*sigma_hit^2) + z_rand, where
+    # d is the distance from the beam endpoint to the nearest obstacle. The
+    # product (vs. an arithmetic mean) gives exponential separation between good
+    # and bad particles, so the cloud converges far faster from an imperfect
+    # initial pose. z_rand floors each beam so one stray reading cannot zero out
+    # a particle. sigma_hit is the endpoint Gaussian width in metres.
+    measurement_sigma_hit: 0.2
+    measurement_z_hit: 0.95
+    measurement_z_rand: 0.05
     motion_update_min_translation: 0.001
     motion_update_min_rotation: 0.001
     # AMCL-style measurement-update gate: only run the scan likelihood model and
@@ -27,39 +37,19 @@ particle_filter_localization_node:
     min_translation_for_heading: 0.01
     resample_xy_noise_std: 0.02
     resample_theta_noise_std: 0.03
-    recovery_score_high: 0.99
-    recovery_score_medium: 0.90
-    recovery_score_low: 0.80
-    recovery_score_min: 0.70
+    # Random-particle recovery (kidnapped-robot global relocalization). The
+    # injected fraction is keyed off the best particle's match quality. With an
+    # initial pose provided, "imperfect but tracking" sits around best=0.70-0.85,
+    # so the thresholds are set so that range injects almost nothing and the
+    # local cloud is allowed to converge. Heavy global scattering only kicks in
+    # when the best score is genuinely low (truly lost). Was 0.99/0.90/0.80/0.70
+    # with 0.0/0.10/0.30/0.50, which scattered 20-50% of particles every
+    # resample during normal convergence and stalled it.
+    recovery_score_high: 0.85
+    recovery_score_medium: 0.70
+    recovery_score_low: 0.55
+    recovery_score_min: 0.40
     recovery_fraction_high: 0.0
-    recovery_fraction_medium: 0.10
-    recovery_fraction_low: 0.30
-    recovery_fraction_min: 0.50
-
-kalman_localization_node:
-  ros__parameters:
-    initial_x: 0.0
-    initial_y: 0.0
-    initial_theta: 0.0
-    initial_std_x: 0.02
-    initial_std_y: 0.02
-    initial_std_theta: 0.02
-    base_process_std_x: 0.005
-    base_process_std_y: 0.005
-    base_process_std_theta: 0.002
-    distance_noise_scale: 0.10
-    rotation_noise_scale: 0.10
-    min_translation_delta: 0.0002
-    min_rotation_delta: 0.0002
-    search_xy_range: 0.20
-    search_theta_range: 0.20
-    search_xy_step: 0.05
-    search_theta_step: 0.05
-    scan_match_beam_step: 10
-    likelihood_max_distance: 1.0
-    min_scan_match_score: 0.40
-    max_correction_translation: 0.25
-    max_correction_rotation: 0.25
-    scan_match_std_x: 0.08
-    scan_match_std_y: 0.08
-    scan_match_std_theta: 0.08
+    recovery_fraction_medium: 0.05
+    recovery_fraction_low: 0.15
+    recovery_fraction_min: 0.30

@@ -157,6 +157,12 @@ ParticleFilterParameters ParticleFilterLocalizationNode::loadParticleFilterParam
     parameters.scan_beam_step =
         static_cast<std::size_t>(
             std::max<long>(1, this->declare_parameter<int>("scan_beam_step", 10)));
+    parameters.measurement_sigma_hit =
+        std::max(0.001, this->declare_parameter<double>("measurement_sigma_hit", 0.2));
+    parameters.measurement_z_hit =
+        std::clamp(this->declare_parameter<double>("measurement_z_hit", 0.95), 0.0, 1.0);
+    parameters.measurement_z_rand =
+        std::clamp(this->declare_parameter<double>("measurement_z_rand", 0.05), 0.0, 1.0);
     parameters.translation_noise_from_translation =
         this->declare_parameter<double>("translation_noise_from_translation", 0.02);
     parameters.translation_noise_base =

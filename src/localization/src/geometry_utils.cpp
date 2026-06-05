@@ -15,11 +15,6 @@ double normalizeAngle(double angle)
     return angle;
 }
 
-double square(double value)
-{
-    return value * value;
-}
-
 geometry_msgs::msg::Quaternion yawToQuaternion(double yaw)
 {
     tf2::Quaternion quaternion;

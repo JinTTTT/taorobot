@@ -16,18 +16,12 @@ The localization package estimates where the robot is in the map and publishes `
 This package assumes:
 - a prebuilt global occupancy grid map is available
 
-## Localization Approaches
+## Localization Approach
 
-This package implements two localization algorithms:
-
-- particle filter localization
-- Kalman filter localization
+This package implements particle filter localization.
 
 The particle filter is a global localization approach. It will be better if the initial pose is unknown or the robot gets lost.
 It can start with particles spread across the free space of the map.
-
-The Kalman filter is a local pose tracker. It will be better if the initial pose is close to the actual pose and the robot does not get lost. The localization will be smoother than the particle filter, but it can lose track if the odometry error grows too large or if the scan matcher fails to find a good local match.
-It assumes the robot starts near the known initial pose `x=0`, `y=0`, `theta=0`.
 
 ## Particle Filter Localization
 
@@ -36,8 +30,7 @@ Each particle is one possible robot position and heading in the map.
 
 At startup, particles are sampled on free map cells.
 As the robot moves, odometry moves every particle with noise.
-When a scan arrives, each particle is scored by checking whether laser hits land near occupied map cells.
-Better particles get higher weights.
+When a scan arrives, each particle is scored with a likelihood-field beam model: every selected laser hit is projected into the map, the distance to the nearest occupied cell is looked up, and that distance is passed through a Gaussian. A particle's weight is the product of the per-beam probabilities (accumulated as a sum of logs), so a particle that matches the map on every beam scores exponentially higher than one that matches on only some.
 The filter then resamples so good pose guesses survive and bad pose guesses disappear.
 It also adds random recovery particles from free map cells when the best scan score drops, so the filter can search again instead of staying confidently wrong.
 
@@ -78,7 +71,7 @@ Advantages:
 Disadvantages:
 
 - needs enough particles to cover the map
-- can be slower than a Kalman filter
+- is more computationally expensive than a single-hypothesis pose tracker
 - can lose accuracy if the likelihood model is too simple
 - may converge to a wrong pose in symmetric environments
 - depends on tuning values such as particle count, scan beam step, and resampling noise
@@ -87,10 +80,10 @@ Disadvantages:
 
 The current implementation uses:
 
-- uniform initialization on free map cells
-- likelihood field construction from the occupancy grid map
+- Gaussian seeding of particles around an `/initialpose` (RViz "2D Pose Estimate")
+- likelihood field construction from the occupancy grid map (a distance transform)
 - odometry motion model with sampled translation and rotation noise
-- scan likelihood scoring using every 10th laser beam
+- likelihood-field beam scoring: product of per-beam Gaussians using every 10th laser beam
 - scan-score logging for debugging
 - stochastic universal resampling after each scan
 - score-based recovery particle injection from free map cells
@@ -109,14 +102,14 @@ Recovery particles are controlled by the best scan score.
 With the default configuration:
 
 ```text
-best score >= 0.99 -> 0% random recovery particles
-best score  = 0.90 -> 10% random recovery particles
-best score  = 0.80 -> 30% random recovery particles
-best score <= 0.70 -> 50% random recovery particles
+best score >= 0.85 -> 0% random recovery particles
+best score  = 0.70 -> 5% random recovery particles
+best score  = 0.55 -> 15% random recovery particles
+best score <= 0.40 -> 30% random recovery particles
 ```
 
 Values between these score points are interpolated smoothly.
-For example, with 500 particles and a 30 percent recovery fraction, about 150 particles are sampled randomly from free map cells.
+For example, with 300 particles and a 15 percent recovery fraction, about 45 particles are sampled randomly from free map cells.
 
 The node publishes `map -> odom` with:
 
@@ -137,28 +130,38 @@ src/localization/config/localization.yaml
 
 Main parameters:
 
-- particle count: `500`
+- particle count: `300`
 - random seed: `42`
+- initial-pose spread: `0.3 m`, `0.17 rad`
 - maximum likelihood field distance: `1.0 m`
 - scan beam step: `10`
-- movement threshold before motion update: `0.001`
+- measurement model: `sigma_hit = 0.2 m`, `z_hit = 0.95`, `z_rand = 0.05`
+- measurement-update gate: `0.20 m`, `0.52 rad`
 - resampling position noise: `0.02 m`
 - resampling heading noise: `0.03 rad`
-- recovery score ramp: `0.99 -> 0%`, `0.90 -> 10%`, `0.80 -> 30%`, `0.70 -> 50%`
+- recovery score ramp: `0.85 -> 0%`, `0.70 -> 5%`, `0.55 -> 15%`, `0.40 -> 30%`
 
 The parameter names are:
 
 - `num_particles`
 - `random_seed`
+- `initial_pose_std_xy`
+- `initial_pose_std_theta`
 - `likelihood_max_distance`
 - `scan_beam_step`
+- `measurement_sigma_hit`
+- `measurement_z_hit`
+- `measurement_z_rand`
 - `motion_update_min_translation`
 - `motion_update_min_rotation`
+- `update_min_translation`
+- `update_min_rotation`
 - `translation_noise_from_translation`
 - `translation_noise_base`
 - `rotation_noise_from_rotation`
 - `rotation_noise_from_translation`
 - `rotation_noise_base`
+- `min_translation_for_heading`
 - `resample_xy_noise_std`
 - `resample_theta_noise_std`
 - `recovery_score_high`
@@ -241,148 +244,18 @@ In RViz:
 Drive the robot with teleop.
 The particles should move with odometry and gradually concentrate near the robot pose.
 
-## Kalman Filter Localization
-
-The Kalman filter estimates the robot pose as one state with uncertainty.
-Instead of keeping many particles, it keeps a mean pose and covariance.
-
-This implementation uses odometry prediction and local scan-matching correction.
-The scan matcher searches around the current Kalman estimate, scores candidate poses against a likelihood field built from `/map`, and publishes the best local match.
-When the scan match score is high enough and the matched pose is close enough to the current prediction, the matched pose is used as a Kalman correction measurement.
-
-This is not global localization.
-It is a local tracker from the known initial pose `0, 0, 0`.
-
-### Interfaces
-
-The Kalman-filter node subscribes to:
-
-- `/map`: `nav_msgs/msg/OccupancyGrid`
-- `/odom`: `nav_msgs/msg/Odometry`
-- `/scan`: `sensor_msgs/msg/LaserScan`
-
-It publishes:
-
-- `/estimated_pose`: `geometry_msgs/msg/PoseStamped`
-- `/estimated_pose_with_covariance`: `geometry_msgs/msg/PoseWithCovarianceStamped`
-- `/scan_matched_pose`: `geometry_msgs/msg/PoseStamped`
-- TF: `map -> odom`
-
-### Characteristics
-
-Advantages:
-
-- computationally cheaper than a particle filter
-- directly represents pose uncertainty with covariance
-- can be smooth and stable when the initial pose is good
-- uses scan matching to correct odometry drift
-- publishes `/scan_matched_pose` for debugging the correction source
-
-Disadvantages:
-
-- does not naturally represent multiple possible poses
-- depends strongly on a reasonable initial pose
-- can fail in ambiguous or highly nonlinear cases
-- is only a local tracker, not a global relocalizer
-- can lose the actual pose if odometry error grows outside the scan matcher search window
-- depends on a reasonable initial pose and scan-matching gate tuning
-
-### Important Methods
-
-The current implementation uses:
-
-- initial pose setup at `x=0`, `y=0`, `theta=0`
-- odometry-based prediction for `[x, y, theta]`
-- covariance growth from process noise when the robot moves
-- likelihood field construction from the occupancy grid map
-- local scan matching around the current Kalman estimate
-- scan-match gating by score, translation distance, and rotation distance
-- Kalman correction with the accepted scan-matched pose
-- covariance publishing in `/estimated_pose_with_covariance`
-
-The scan matcher searches around the current estimate with a small grid of candidate poses.
-Each candidate pose is scored by projecting selected scan beams into the likelihood field.
-The best valid candidate is published on `/scan_matched_pose`.
-
-### Parameters
-
-Kalman-filter and scan-matcher tuning lives in:
-
-```text
-src/localization/config/localization.yaml
-```
-
-Main parameters:
-
-- initial pose: `x=0`, `y=0`, `theta=0`
-- initial standard deviations: `0.02`, `0.02`, `0.02`
-- base process standard deviations: `0.005`, `0.005`, `0.002`
-- distance noise scale: `0.10`
-- rotation noise scale: `0.10`
-- minimum odometry update deltas: `0.001 m`, `0.001 rad`
-- scan matcher search range: `0.20 m`, `0.20 rad`
-- scan matcher search step: `0.05 m`, `0.05 rad`
-- scan matcher beam step: `10`
-- scan matcher likelihood distance: `1.0 m`
-- minimum scan match score for correction: `0.40`
-- maximum correction distance: `0.25 m`
-- maximum correction rotation: `0.25 rad`
-- scan match measurement standard deviations: `0.08`, `0.08`, `0.08`
-
-The parameter groups are:
-
-- initial pose: `initial_x`, `initial_y`, `initial_theta`
-- initial covariance: `initial_std_x`, `initial_std_y`, `initial_std_theta`
-- process noise: `base_process_std_x`, `base_process_std_y`, `base_process_std_theta`, `distance_noise_scale`, `rotation_noise_scale`
-- odometry update thresholds: `min_translation_delta`, `min_rotation_delta`
-- scan matching: `search_xy_range`, `search_theta_range`, `search_xy_step`, `search_theta_step`, `scan_match_beam_step`, `likelihood_max_distance`
-- scan-match correction gate: `min_scan_match_score`, `max_correction_translation`, `max_correction_rotation`
-- scan-match measurement noise: `scan_match_std_x`, `scan_match_std_y`, `scan_match_std_theta`
-
-### Run and Visualize
-
-Use the same simulation, teleop, RViz, and map-server setup from the particle-filter run section.
-Then start Kalman-filter localization:
-
-```bash
-ros2 run localization kalman_localization_node
-```
-
-or with the package config:
-
-```bash
-ros2 launch localization kalman_localization.launch.py
-```
-
-In RViz:
-
-- set Fixed Frame to `map`
-- add `/map`
-- add `/estimated_pose`
-- add `/estimated_pose_with_covariance`
-- add `/scan_matched_pose`
-
-The `/estimated_pose` topic shows the Kalman estimate.
-The `/estimated_pose_with_covariance` topic shows the estimate with uncertainty.
-The `/scan_matched_pose` topic shows the best local scan-matching pose before gating.
-
 ## Existing Issues and Future Improvements
 
 Current issues:
 
-- both localization nodes publish `/estimated_pose` and `map -> odom`, so they cannot run together
-- the particle filter uses a simple likelihood field sensor model
-- the particle filter estimate still does not publish covariance
-- the Kalman filter assumes the initial pose is already close to the real pose
-- the Kalman filter can lose track if the scan match is outside the local search window
+- the particle filter estimate does not publish covariance
 - global localization can still fail in symmetric map areas
+- recovery from a wrong initial pose is slow, because injection is keyed off the absolute scan score rather than a relative drop in fit
 - the particle cloud can collapse too much after repeated resampling
 
 Potential improvements:
 
 - publish covariance for the particle-filter estimate
-- improve scan scoring with a stronger probabilistic sensor model
-- add confidence output for both localization algorithms
-- add recovery behavior when localization confidence is low
-- add global relocalization or particle-filter reset behavior
-- add tests for map indexing, likelihood lookup, resampling, angle averaging, covariance updates, and scan matching
+- replace the score-ramp recovery with adaptive (augmented MCL) injection driven by short- and long-term fit averages
+- add a scan-match snap on `/initialpose` to recover from a poor initial guess
+- add tests for map indexing, likelihood lookup, resampling, and angle averaging

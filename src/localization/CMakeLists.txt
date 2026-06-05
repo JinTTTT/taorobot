@@ -28,10 +28,8 @@ endif()
 
 add_library(localization_core
   src/geometry_utils.cpp
-  src/kalman_filter.cpp
   src/likelihood_field.cpp
   src/particle_filter.cpp
-  src/scan_matcher.cpp
 )
 
 target_include_directories(localization_core PUBLIC
@@ -45,27 +43,15 @@ ament_target_dependencies(localization_core
   tf2
 )
 
-add_executable(particle_filter_localization_node 
+add_executable(particle_filter_localization_node
   src/particle_filter_localization_node.cpp
-)
-
-add_executable(kalman_localization_node
-  src/kalman_localization_node.cpp
 )
 
 target_include_directories(particle_filter_localization_node PUBLIC
   include
 )
 
-target_include_directories(kalman_localization_node PUBLIC
-  include
-)
-
 target_link_libraries(particle_filter_localization_node
-  localization_core
-)
-
-target_link_libraries(kalman_localization_node
   localization_core
 )
 
@@ -79,20 +65,9 @@ ament_target_dependencies(particle_filter_localization_node
   tf2_geometry_msgs
 )
 
-ament_target_dependencies(kalman_localization_node
-  rclcpp
-  sensor_msgs
-  nav_msgs
-  geometry_msgs
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
-)
-
 install(TARGETS
   localization_core
   particle_filter_localization_node
-  kalman_localization_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
