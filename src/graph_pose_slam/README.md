@@ -29,11 +29,13 @@ The SLAM node already builds the occupancy grid and publishes it on `/map`
 Run, in separate terminals:
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py        # robot, /scan, /odom, /cmd_vel
-ros2 launch graph_pose_slam graph_pose_slam.launch.py      # SLAM: publishes /map, map->odom TF
-rviz2                                                       # Fixed Frame = map, add Map on /map
-ros2 run teleop_twist_keyboard teleop_twist_keyboard       # drive the robot
+ros2 launch simulation bringup_simulation.launch.py    # robot, /scan, /odom, /cmd_vel
+ros2 launch bringup slam.launch.py                     # SLAM + preconfigured RViz
+ros2 run teleop_twist_keyboard teleop_twist_keyboard   # drive the robot
 ```
+
+(`ros2 launch graph_pose_slam graph_pose_slam.launch.py` runs SLAM alone,
+without RViz.)
 
 Drive slowly to cover the whole environment, and **return to an
 already-visited spot to trigger a loop closure** — that is what corrects

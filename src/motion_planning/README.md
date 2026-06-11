@@ -112,50 +112,28 @@ cd ~/workspace/gazebo_ws
 source install/setup.bash
 ```
 
-Start simulation:
+The easiest way to see the planner in action is the navigation bringup, which
+starts the map server, localization, this planner, the path follower, and a
+preconfigured RViz:
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py
+ros2 launch simulation bringup_simulation.launch.py   # 1. simulation
+ros2 launch bringup navigation.launch.py              # 2. full stack + RViz
 ```
 
-Start the saved map server:
+To run only this package on top of an existing map and pose estimate:
 
 ```bash
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:=src/mapping/maps/maze_map.yaml
+ros2 launch localization particle_filter_localization.launch.py   # map server + localization
+ros2 launch motion_planning motion_planning.launch.py              # this planner
 ```
 
-Activate the map server:
+In RViz (the navigation bringup preconfigures this; add `/inflated_map`
+manually if you want to see the inflation):
 
-```bash
-ros2 run nav2_util lifecycle_bringup map_server
-```
-
-Start localization:
-
-```bash
-ros2 launch localization kalman_localization.launch.py
-```
-
-Start motion planning:
-
-```bash
-ros2 launch motion_planning motion_planning.launch.py
-```
-
-Start RViz:
-
-```bash
-rviz2
-```
-
-In RViz:
-
-- set Fixed Frame to `map`
-- add `/map`
-- add `/inflated_map`
-- add `/planned_path`
-- add `/smoothed_planned_path`
+- give the particle filter an initial guess with the `2D Pose Estimate` tool
 - use the `2D Goal Pose` tool to request a path
+- watch `/planned_path` and `/smoothed_planned_path`
 
 ## Limitations
 

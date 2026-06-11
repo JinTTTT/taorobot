@@ -27,8 +27,7 @@ closure:
 ```bash
 ros2 launch simulation bringup_simulation.launch.py    # 1. simulation
 ros2 run teleop_twist_keyboard teleop_twist_keyboard   # 2. teleop
-ros2 launch graph_pose_slam graph_pose_slam.launch.py  # 3. SLAM
-rviz2                                                  # 4. add /map, /poses_graph, /estimated_pose, TF
+ros2 launch bringup slam.launch.py                     # 3. SLAM + RViz
 ```
 
 ## Demo 2 — Localization
@@ -39,13 +38,12 @@ again after the robot is "kidnapped":
 ![particle filter localizing the robot in a maze](docs/media/localization.gif)
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py                # 1. simulation
-ros2 run teleop_twist_keyboard teleop_twist_keyboard               # 2. teleop
-ros2 launch localization particle_filter_localization.launch.py   # 3. map server + particle filter
-rviz2                                                              # 4. add /map, /particlecloud, /estimated_pose
+ros2 launch simulation bringup_simulation.launch.py    # 1. simulation
+ros2 run teleop_twist_keyboard teleop_twist_keyboard   # 2. teleop
+ros2 launch bringup localization.launch.py             # 3. map server + particle filter + RViz
 ```
 
-The launch file serves a saved SLAM-built map on `/map` (override with
+The launch serves a saved SLAM-built map on `/map` (override with
 `map:=/abs/path.yaml`) and starts the particle filter, which waits for an
 initial guess — give it one with the **2D Pose Estimate** tool in RViz, then
 drive around and watch the particles converge.
@@ -58,15 +56,17 @@ pure pursuit:
 ![robot planning a path and driving to a goal pose](docs/media/navigation.gif)
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py                # 1. simulation
-ros2 launch localization particle_filter_localization.launch.py   # 2. map server + localization
-ros2 launch motion_planning motion_planning.launch.py              # 3. global planner
-ros2 launch path_follow_control path_follow_control.launch.py      # 4. pure-pursuit controller
-rviz2   # 5. add /map, /planned_path, /smoothed_planned_path, then send a 2D Goal Pose
+ros2 launch simulation bringup_simulation.launch.py   # 1. simulation
+ros2 launch bringup navigation.launch.py              # 2. localization + planner + controller + RViz
 ```
 
+The second launch brings up the whole stack (`map:=/abs/path.yaml` to swap
+maps). Give the particle filter an initial guess with **2D Pose Estimate**,
+then send a **2D Goal Pose** — the robot drives there.
+
 > Run each command in its own terminal after building ([Quick Start](#quick-start)),
-> `source install/setup.bash` in each one, and set the RViz **Fixed Frame** to `map`.
+> with `source install/setup.bash` in each one. Every `bringup` launch opens a
+> preconfigured RViz (skip with `use_rviz:=false`).
 
 ## How the stack fits together
 
@@ -131,13 +131,14 @@ source install/setup.bash
 | [`slam_fastslam`](src/slam_fastslam/) | FastSLAM: every particle carries its own pose, trajectory, and map |
 | [`motion_planning`](src/motion_planning/) | A* on an inflated grid + line-of-sight shortcutting + spline smoothing |
 | [`path_follow_control`](src/path_follow_control/) | Pure-pursuit path follower publishing `/cmd_vel` |
+| [`bringup`](src/bringup/) | Top-level launch files composing the stack, plus shared RViz views |
 
 Each package has its own README with the full design and tuning notes.
 
 ## Roadmap
 
-- **Navigation** — tie localization, planning, and control into one
-  goal-to-goal navigation bringup with recovery behaviors. In progress.
+- **Recovery behaviors** — detect a stuck or lost robot during navigation,
+  then replan, back off, or re-localize automatically.
 - **Drop the last Nav2 dependency** — a minimal map-server node in `mapping`
   (load YAML + PGM, publish a latched `/map`) so the stack is 100% from scratch.
 - **`graph_pose_slam` performance** — loop-closure search cost grows with the

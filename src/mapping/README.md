@@ -164,17 +164,16 @@ Start teleop:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
-Start the mapper:
-
-```bash
-ros2 run mapping occupancy_mapper_node
-```
-
-or:
+Start the mapper with its launch file — it also publishes the static identity
+`map -> odom` transform that RViz needs during mapping:
 
 ```bash
 ros2 launch mapping mapping.launch.py
 ```
+
+(`ros2 run mapping occupancy_mapper_node` runs the node alone; then publish the
+static transform yourself with
+`ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom`.)
 
 Start RViz:
 
@@ -187,15 +186,9 @@ In RViz:
 - set Fixed Frame to `map`
 - add `/map`
 
-During mapping, RViz needs a transform between `map` and `odom`.
-For this first mapper, `map` and `odom` can be treated as the same frame:
-
-```bash
-ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom
-```
-
-Do not use this static transform while running localization.
-Localization publishes the real `map -> odom` transform.
+Do not run this together with localization or SLAM.
+They publish the real `map -> odom` transform, which conflicts with the
+identity transform used here.
 
 ## Generated Map For Localization
 
@@ -233,22 +226,18 @@ src/mapping/maps/maze_map.pgm
 
 ### Publish The Saved Map
 
-Start the map server:
+Use the self-activating map-server launch (it wraps `nav2_map_server` and
+drives its lifecycle transitions, so no manual activation is needed):
 
 ```bash
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:=src/mapping/maps/maze_map.yaml
-```
-
-Activate the lifecycle node:
-
-```bash
-ros2 run nav2_util lifecycle_bringup map_server
+ros2 launch graph_pose_slam map_server.launch.py map:=$(pwd)/src/mapping/maps/maze_map.yaml
 ```
 
 In RViz:
 
 - set Fixed Frame to `map`
-- add `/map`
+- add `/map` (set the topic's Durability Policy to `Transient Local` so the
+  latched map appears even if RViz started first)
 
 ## Existing Issues and Future Improvements
 

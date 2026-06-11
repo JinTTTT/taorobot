@@ -188,58 +188,28 @@ cd ~/workspace/gazebo_ws
 source install/setup.bash
 ```
 
-Start simulation:
+The easiest way to run localization is the task bringup, which starts the map
+server, the particle filter, and a preconfigured RViz:
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py
+ros2 launch simulation bringup_simulation.launch.py    # 1. simulation
+ros2 run teleop_twist_keyboard teleop_twist_keyboard   # 2. teleop
+ros2 launch bringup localization.launch.py             # 3. map server + particle filter + RViz
 ```
 
-Start teleop:
+To run only this package (no RViz), use its own launch file — it serves a saved
+SLAM-built map on `/map` (latched) and starts the particle filter:
 
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 launch localization particle_filter_localization.launch.py            # default map
+ros2 launch localization particle_filter_localization.launch.py map:=/abs/path.yaml
 ```
 
-Start RViz:
-
-```bash
-rviz2
-```
-
-Publish the saved map:
-
-```bash
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:=src/mapping/maps/maze_map.yaml
-```
-
-Activate the map server:
-
-```bash
-ros2 run nav2_util lifecycle_bringup map_server
-```
-
-Start particle-filter localization:
-
-```bash
-ros2 run localization particle_filter_localization_node
-```
-
-or with the package config:
-
-```bash
-ros2 launch localization particle_filter_localization.launch.py
-```
-
-In RViz:
-
-- set Fixed Frame to `map`
-- add `/map`
-- add `/likelihood_field`
-- add `/particlecloud`
-- add `/estimated_pose`
-
-Drive the robot with teleop.
+Give the filter an initial guess with the **2D Pose Estimate** tool in RViz,
+then drive the robot with teleop.
 The particles should move with odometry and gradually concentrate near the robot pose.
+Don't run SLAM or the mapping node at the same time — they also publish `/map`
+and `map -> odom`.
 
 ## Existing Issues and Future Improvements
 

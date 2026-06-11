@@ -204,20 +204,14 @@ ros2 run mapping occupancy_mapper_node
 
 The mapper reads `/scan` and TF from the simulation and publishes `/map`.
 
-For localization:
+For localization (map server + particle filter + RViz):
 
 ```bash
-ros2 run localization particle_filter_localization_node
+ros2 launch bringup localization.launch.py
 ```
 
-or:
-
-```bash
-ros2 run localization kalman_localization_node
-```
-
-The localization nodes read `/odom`, `/scan`, and `/map`.
-They publish the estimated robot pose and the `map -> odom` transform.
+The localization node reads `/odom`, `/scan`, and `/map`.
+It publishes the estimated robot pose and the `map -> odom` transform.
 
 ## Existing Issues and Future Improvements
 
@@ -227,12 +221,10 @@ Current issues:
 - the robot and world are simple learning models
 - simulated sensor noise is limited
 - the bridge topic list is fixed in the launch file
-- RViz is started manually
 
 Potential improvements:
 
 - add launch arguments for world file and spawn pose
-- add optional RViz launch support
 - add configurable sensor noise
 - add more realistic robot dimensions and dynamics
 - add more test worlds for mapping and localization
