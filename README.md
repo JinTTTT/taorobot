@@ -39,37 +39,29 @@ again after the robot is "kidnapped":
 ![particle filter localizing the robot in a maze](docs/media/localization.gif)
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py    # 1. simulation
-ros2 run teleop_twist_keyboard teleop_twist_keyboard   # 2. teleop
-# 3. publish the saved map:
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:=src/mapping/maps/maze_map.yaml
-ros2 run nav2_util lifecycle_bringup map_server
-# 4. localization — run ONE of these:
-ros2 run localization particle_filter_localization_node   # particle filter
-ros2 run localization kalman_localization_node            # or Kalman filter
-rviz2                                                  # 5. add /map, /particlecloud, /estimated_pose
+ros2 launch simulation bringup_simulation.launch.py                # 1. simulation
+ros2 run teleop_twist_keyboard teleop_twist_keyboard               # 2. teleop
+ros2 launch localization particle_filter_localization.launch.py   # 3. map server + particle filter
+rviz2                                                              # 4. add /map, /particlecloud, /estimated_pose
 ```
 
-The localization node publishes `map → odom`, so don't run a static transform,
-and don't run both localization nodes at once.
+The launch file serves a saved SLAM-built map on `/map` (override with
+`map:=/abs/path.yaml`) and starts the particle filter, which waits for an
+initial guess — give it one with the **2D Pose Estimate** tool in RViz, then
+drive around and watch the particles converge.
 
 ## Demo 3 — Navigation
 
 Send a goal in RViz; the robot plans an A* path, smooths it, and drives it with
-pure pursuit.
+pure pursuit:
 
-🎬 *Demo video coming soon.*
+![robot planning a path and driving to a goal pose](docs/media/navigation.gif)
 
 ```bash
-ros2 launch simulation bringup_simulation.launch.py    # 1. simulation
-# 2. static map server:
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:=src/mapping/maps/maze_map.yaml
-ros2 run nav2_util lifecycle_bringup map_server
-# 3. localization:
-ros2 launch localization particle_filter_localization.launch.py
-# 4. planning + control:
-ros2 launch motion_planning motion_planning.launch.py
-ros2 launch path_follow_control path_follow_control.launch.py
+ros2 launch simulation bringup_simulation.launch.py                # 1. simulation
+ros2 launch localization particle_filter_localization.launch.py   # 2. map server + localization
+ros2 launch motion_planning motion_planning.launch.py              # 3. global planner
+ros2 launch path_follow_control path_follow_control.launch.py      # 4. pure-pursuit controller
 rviz2   # 5. add /map, /planned_path, /smoothed_planned_path, then send a 2D Goal Pose
 ```
 
@@ -108,8 +100,8 @@ taorobot makes the opposite trade:
 To be clear: this is **not** a production replacement for Nav2. It's the stack
 you study so that Nav2 stops being magic — or the starting point you fork when
 Nav2 is more machinery than your robot needs. (The only borrowed piece left is
-`nav2_map_server` for serving saved maps in two demos; replacing it is on the
-[roadmap](#roadmap).)
+`nav2_map_server`, wrapped in a small launch file to serve saved maps;
+replacing it is on the [roadmap](#roadmap).)
 
 ## Quick Start
 
@@ -122,7 +114,7 @@ cd taorobot
 
 # install dependencies (g2o, map server, ...)
 rosdep install --from-paths src --ignore-src -y
-sudo apt install ros-humble-teleop-twist-keyboard ros-humble-nav2-util
+sudo apt install ros-humble-teleop-twist-keyboard
 
 colcon build --symlink-install
 source install/setup.bash
@@ -134,7 +126,7 @@ source install/setup.bash
 | ------- | ------------- |
 | [`simulation`](src/simulation/) | Gazebo world, diff-drive robot, 2D lidar — publishes `/scan`, `/odom`, TF |
 | [`mapping`](src/mapping/) | Occupancy-grid mapping: Bresenham ray-tracing + log-odds updates |
-| [`localization`](src/localization/) | Particle filter & Kalman filter against a known map, publishing `map → odom` |
+| [`localization`](src/localization/) | Particle-filter (Monte-Carlo) localization against a known map, publishing `map → odom` |
 | [`graph_pose_slam`](src/graph_pose_slam/) | Keyframe pose-graph SLAM: correlative scan matching + g2o loop closure |
 | [`slam_fastslam`](src/slam_fastslam/) | FastSLAM: every particle carries its own pose, trajectory, and map |
 | [`motion_planning`](src/motion_planning/) | A* on an inflated grid + line-of-sight shortcutting + spline smoothing |

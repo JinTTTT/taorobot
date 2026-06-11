@@ -1,7 +1,7 @@
 path_follow_control_node:
   ros__parameters:
     lookahead_distance: 0.35
-    max_linear_speed: 0.30
+    max_linear_speed: 0.50
     min_linear_speed: 0.05
     max_angular_speed: 0.8
     curvature_slowdown_gain: 0.60
