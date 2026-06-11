@@ -7,3 +7,6 @@ log/
 .claude/
 CLAUDE.md
 AGENTS.md
+
+# video sources for docs (GIFs are committed instead)
+docs/media/*.mp4
