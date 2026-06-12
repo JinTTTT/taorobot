@@ -131,7 +131,7 @@ taorobot makes the opposite trade:
 | Built for         | production robots                         | understanding                     |
 | Architecture      | plugins, lifecycle managers, behavior trees | one plain ROS 2 node per algorithm |
 | Size              | hundreds of thousands of lines, many dependencies | **~12,000 lines — the whole stack** |
-| Parameters        | hundreds, spread across plugin namespaces | **~110**, in seven short YAML files with the reasoning in comments |
+| Parameters        | hundreds, spread across plugin namespaces | **less than 100**, in seven short YAML files with the reasoning in comments |
 | When it misbehaves | tune YAML and hope                        | read the code, fix the math       |
 
 To be clear: this is **not** a production replacement for Nav2. It's the stack
@@ -188,7 +188,6 @@ technique — reading them in this order is a curriculum:
 | FastSLAM — Rao-Blackwellized particles, every particle carries its own map | [`slam_fastslam`](src/slam_fastslam/) |
 | A* global planning — obstacle inflation, line-of-sight shortcutting, spline smoothing | [`motion_planning`](src/motion_planning/) |
 | Pure-pursuit control — lookahead tracking, rotate-in-place recovery, stuck detection | [`path_follow_control`](src/path_follow_control/) |
-| TF frame conventions — who publishes `map → odom → base_link`, and why | every README above |
 
 ## Contributing
 
