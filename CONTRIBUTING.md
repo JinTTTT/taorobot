@@ -11,7 +11,7 @@ No contribution is too small.
 - 💬 **Ask a question** — open an issue. If it confused you, it confused others.
 - 🐛 **Report a bug** — what you did, what you expected, what happened instead.
 - ✍️ **Improve the docs** — clearer explanations are hugely valuable here.
-- 🧑‍💻 **Write code** — fix a bug, add a test, or build a roadmap item.
+- 🧑‍💻 **Write code** — fix a bug, add a test, or tackle a limitation listed in a package README.
 
 ## Making a change
 

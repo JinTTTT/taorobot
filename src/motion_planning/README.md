@@ -88,5 +88,5 @@ Tuning lives in `config/motion_planning.yaml`:
 - Static map only — no costmap updates from live sensor data.
 - Plans once per goal; it does not replan unless a new goal arrives.
 - No local obstacle avoidance or dynamic-obstacle handling (a local planner
-  between this and pure pursuit is on the project roadmap).
+  between this and pure pursuit is planned).
 - Assumes the localization pose is good enough to plan from.

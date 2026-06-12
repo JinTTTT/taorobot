@@ -54,8 +54,8 @@ A **stuck monitor** runs throughout: whenever the controller is commanding
 motion, it checks every `stuck_detection_window_seconds` whether the robot
 actually moved (`min_progress_distance_m`) or got closer to the goal
 (`min_goal_distance_improvement_m`). If neither happened, it flags stuck —
-currently this logs a warning; acting on it (replan, back off, re-localize) is
-the *recovery behaviors* item on the project roadmap.
+currently this logs a warning; acting on it (replan, back off, re-localize)
+is the planned next step for this package.
 
 The controller core works on plain C++ pose/path/command types; the ROS node
 only converts messages at the boundary.
@@ -109,6 +109,6 @@ Tuning lives in `config/path_follow_control.yaml`:
 
 - Follows a static path — no local replanning around blocked segments and no
   dynamic-obstacle avoidance.
-- Stuck detection only reports; recovery behaviors are a roadmap item.
+- Stuck detection only reports; recovery behaviors are planned.
 - Tracking accuracy depends on localization staying good — a particle-filter
   jump shows up as a steering correction.

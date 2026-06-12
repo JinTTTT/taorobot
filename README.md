@@ -70,23 +70,58 @@ then send a **2D Goal Pose** — the robot drives there.
 
 ## How the stack fits together
 
+The three demos are the same stack with more pieces switched on, in the
+classic learning order: first the map is unknown (SLAM), then the map is known
+but the pose isn't (localization), then the robot uses both to drive itself
+(navigation).
+
+**Demo 1 — SLAM.** You drive; the robot builds the map and tracks its own pose
+in it:
+
 ```mermaid
 flowchart LR
-    SIM["simulation<br/>Gazebo · diff-drive · lidar"] -- "/scan · /odom" --> LOC["graph_pose_slam<br/>or localization"]
-    LOC -- "/map · /estimated_pose" --> PLAN["motion_planning<br/>A* + smoothing"]
+    YOU["teleop (you)"] -- "/cmd_vel" --> SIM["simulation<br/>Gazebo · diff-drive · lidar"]
+    SIM -- "/scan · /odom" --> SLAM["graph_pose_slam<br/>scan matching + loop closure"]
+    SLAM -- "/map · /estimated_pose" --> RVIZ["RViz"]
+```
+
+**Demo 2 — Localization.** You drive; the map is already known (saved from
+Demo 1), and a particle filter works out where the robot is in it:
+
+```mermaid
+flowchart LR
+    YOU["teleop (you)"] -- "/cmd_vel" --> SIM["simulation"]
+    MAPSRV["map server<br/>saved map"] -- "/map" --> PF["localization<br/>particle filter"]
+    SIM -- "/scan · /odom" --> PF
+    PF -- "/estimated_pose · map→odom" --> RVIZ["RViz"]
+```
+
+**Demo 3 — Navigation.** Nobody drives. Localization feeds the planner, the
+planner feeds the controller, the controller moves the robot — the loop closes:
+
+```mermaid
+flowchart LR
+    GOAL["RViz goal"] --> PLAN["motion_planning<br/>A* + smoothing"]
+    MAPSRV["map server"] -- "/map" --> PF["localization<br/>particle filter"]
+    SIM["simulation"] -- "/scan · /odom" --> PF
+    PF -- "/estimated_pose" --> PLAN
     PLAN -- "/smoothed_planned_path" --> CTRL["path_follow_control<br/>pure pursuit"]
     CTRL -- "/cmd_vel" --> SIM
 ```
 
-The robot senses, figures out where it is, plans a path, and drives it — and
-every box in that loop is a node you can open and read.
+Every box in these diagrams is a plain ROS 2 node in this repo that you can
+open and read.
 
 ## Why not just use Nav2?
 
 Nav2 and SLAM Toolbox are excellent production tools — and that's exactly why
-they're hard to learn from. They're built to be *configured*, not *read*:
-plugin interfaces, lifecycle managers, behavior trees, and parameters tuned by
-folklore.
+they're hard to learn from. Production-grade means they have to work for every
+robot shape, sensor setup, and edge case, which brings heavy machinery: plugin
+interfaces, lifecycle managers, behavior trees, costmap layers, and a long
+dependency list. All of that makes them hard to read and even harder to
+change — they're built to be *configured*, not *understood*. And configuring
+is a job of its own: a typical Nav2 bringup has hundreds of parameters, tuned
+mostly by folklore.
 
 taorobot makes the opposite trade:
 
@@ -94,14 +129,15 @@ taorobot makes the opposite trade:
 | ----------------- | ----------------------------------------- | --------------------------------- |
 | Built for         | production robots                         | understanding                     |
 | Architecture      | plugins, lifecycle managers, behavior trees | one plain ROS 2 node per algorithm |
-| Size              | hundreds of thousands of lines            | **~12,000 lines — the whole stack** |
+| Size              | hundreds of thousands of lines, many dependencies | **~12,000 lines — the whole stack** |
+| Parameters        | hundreds, spread across plugin namespaces | **~110**, in seven short YAML files with the reasoning in comments |
 | When it misbehaves | tune YAML and hope                        | read the code, fix the math       |
 
 To be clear: this is **not** a production replacement for Nav2. It's the stack
 you study so that Nav2 stops being magic — or the starting point you fork when
 Nav2 is more machinery than your robot needs. (The only borrowed piece left is
-`nav2_map_server`, wrapped in a small launch file to serve saved maps;
-replacing it is on the [roadmap](#roadmap).)
+`nav2_map_server`, wrapped in a small launch file to serve saved maps; a
+from-scratch replacement is planned.)
 
 ## Quick Start
 
@@ -137,17 +173,21 @@ source install/setup.bash
 
 Each package has its own README with the full design and tuning notes.
 
-## Roadmap
+## What you'll learn
 
-- **Recovery behaviors** — detect a stuck or lost robot during navigation,
-  then replan, back off, or re-localize automatically.
-- **Drop the last Nav2 dependency** — a minimal map-server node in `mapping`
-  (load YAML + PGM, publish a latched `/map`) so the stack is 100% from scratch.
-- **`graph_pose_slam` performance** — loop-closure search cost grows with the
-  number of nearby keyframes; planned: spatial subsampling of candidates, a
-  loop-closure cooldown, or an async loop-closure back-end.
-- **A local planner** — reactive obstacle avoidance between the global plan
-  and pure pursuit.
+Each package is a from-scratch implementation of one classic robotics
+technique — reading them in this order is a curriculum:
+
+| Concept | Where to read it |
+| ------- | ---------------- |
+| Odometry noise modeling — Thrun's velocity motion model, why perfect odometry teaches nothing | [`simulation`](src/simulation/) |
+| Occupancy-grid mapping — Bresenham ray tracing, log-odds cell updates | [`mapping`](src/mapping/) |
+| Particle-filter localization — likelihood fields, low-variance resampling, kidnap recovery | [`localization`](src/localization/) |
+| Pose-graph SLAM — correlative scan matching, loop closure, g2o graph optimization | [`graph_pose_slam`](src/graph_pose_slam/) |
+| FastSLAM — Rao-Blackwellized particles, every particle carries its own map | [`slam_fastslam`](src/slam_fastslam/) |
+| A* global planning — obstacle inflation, line-of-sight shortcutting, spline smoothing | [`motion_planning`](src/motion_planning/) |
+| Pure-pursuit control — lookahead tracking, rotate-in-place recovery, stuck detection | [`path_follow_control`](src/path_follow_control/) |
+| TF frame conventions — who publishes `map → odom → base_link`, and why | every README above |
 
 ## Contributing
 
