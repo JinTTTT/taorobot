@@ -2,7 +2,6 @@
 build/
 install/
 log/
-.github/
 .codex*
 .claude/
 CLAUDE.md

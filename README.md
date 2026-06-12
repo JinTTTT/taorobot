@@ -4,6 +4,7 @@
 
 **A complete ROS 2 autonomous driving stack, from scratch — no Nav2, no SLAM Toolbox, no black boxes.**
 
+[![CI](https://github.com/JinTTTT/taorobot/actions/workflows/ci.yml/badge.svg)](https://github.com/JinTTTT/taorobot/actions/workflows/ci.yml)
 [![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-blue)](https://docs.ros.org/en/humble/)
 [![Gazebo](https://img.shields.io/badge/Sim-Gazebo-orange)](https://gazebosim.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)

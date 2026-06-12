@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Clean ROS 2 Humble environment (Ubuntu 22.04 + ros-base + dev tools).
+    # If the build passes here, `rosdep install` + `colcon build` from the
+    # README works on a fresh machine.
+    container: ros:humble
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          rosdep update --rosdistro humble
+          rosdep install --from-paths src --ignore-src -y --rosdistro humble
+
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --symlink-install --event-handlers console_cohesion+
+
+      - name: Test
+        shell: bash
+        # -LE linter: run the unit tests but skip the auto-registered style
+        # linters (uncrustify & co.) — adopting a lint style is a separate,
+        # deliberate change.
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon test --event-handlers console_cohesion+ --ctest-args -LE linter
+          colcon test-result --verbose
