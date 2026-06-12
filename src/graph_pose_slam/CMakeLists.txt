@@ -8,6 +8,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+# g2o's config pulls in FindOpenGL; state a GL preference so CMP0072 stays quiet
+set(OpenGL_GL_PREFERENCE GLVND)
 find_package(g2o REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(mapping REQUIRED)
