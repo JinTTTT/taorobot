@@ -16,6 +16,10 @@ and Gazebo — **every algorithm implemented by hand**, in plain, readable nodes
 Most robotics tutorials hand you Nav2 and SLAM Toolbox as black boxes. This one
 doesn't: read it, run it, break it, and actually understand how a robot thinks.
 
+> **To run the demos:** build the workspace first ([Quick Start](#quick-start)),
+> then run each command in its own terminal with `source install/setup.bash`.
+> Every `bringup` launch opens a preconfigured RViz (skip with `use_rviz:=false`).
+
 ## Demo 1 — SLAM
 
 Graph-pose SLAM, written from scratch, mapping a maze with only a lidar and a
@@ -33,7 +37,7 @@ ros2 launch bringup slam.launch.py                     # 3. SLAM + RViz
 ## Demo 2 — Localization
 
 A particle filter finding the robot's true pose in a known map — and finding it
-again after the robot is "kidnapped":
+again after the wheel odometry is corrupted by driving the robot against a wall:
 
 ![particle filter localizing the robot in a maze](docs/media/localization.gif)
 
@@ -63,10 +67,6 @@ ros2 launch bringup navigation.launch.py              # 2. localization + planne
 The second launch brings up the whole stack (`map:=/abs/path.yaml` to swap
 maps). Give the particle filter an initial guess with **2D Pose Estimate**,
 then send a **2D Goal Pose** — the robot drives there.
-
-> Run each command in its own terminal after building ([Quick Start](#quick-start)),
-> with `source install/setup.bash` in each one. Every `bringup` launch opens a
-> preconfigured RViz (skip with `use_rviz:=false`).
 
 ## How the stack fits together
 
@@ -105,14 +105,16 @@ replacing it is on the [roadmap](#roadmap).)
 
 ## Quick Start
 
-ROS 2 Humble, Gazebo (classic), and `colcon`. The repository is itself a colcon
-workspace — clone and build it directly:
+Tested on Ubuntu 22.04 with [ROS 2 Humble](https://docs.ros.org/en/humble/Installation.html).
+The simulator is the modern **Gazebo Sim** (Fortress, via `ros_gz`) — *not*
+Gazebo Classic — and `rosdep` below installs it for you. The repository is
+itself a colcon workspace — clone and build it directly:
 
 ```bash
 git clone https://github.com/JinTTTT/taorobot.git
 cd taorobot
 
-# install dependencies (g2o, map server, ...)
+# install dependencies (Gazebo Sim + ros_gz bridge, g2o, map server, ...)
 rosdep install --from-paths src --ignore-src -y
 sudo apt install ros-humble-teleop-twist-keyboard
 
