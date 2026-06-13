@@ -17,6 +17,10 @@ and Gazebo — **every algorithm implemented by hand**, in plain, readable nodes
 Most robotics tutorials hand you Nav2 and SLAM Toolbox as black boxes. This one
 doesn't: read it, run it, break it, and actually understand how a robot thinks.
 
+Think of it as the other way to put an autonomy pipeline on a robot: instead of
+Nav2's hundreds of parameters, start from a simple, transparent baseline you can
+fully read, tune far fewer knobs, and add only the features your robot needs.
+
 > **To run the demos:** build the workspace first ([Quick Start](#quick-start)),
 > then run each command in its own terminal with `source install/setup.bash`.
 > Every `bringup` launch opens a preconfigured RViz (skip with `use_rviz:=false`).
