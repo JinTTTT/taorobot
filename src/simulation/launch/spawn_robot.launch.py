@@ -26,7 +26,8 @@ def generate_launch_description():
     # 3. ACTION: Start the Gazebo Simulator
     # We use the standard "ros_gz_sim" launch file.
     # '-r' means "run immediately" (don't start paused).
-    world_file = os.path.join(pkg_path, 'worlds', 'my_world.sdf')
+    # world_file = os.path.join(pkg_path, 'worlds', 'my_world.sdf')
+    world_file = os.path.join(pkg_path, 'worlds', 'office_world.sdf')
     start_gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
@@ -42,8 +43,8 @@ def generate_launch_description():
         arguments=[
             '-topic', 'robot_description', # The topic where the URDF is published
             '-name', 'my_first_robot',     # The name it will have in Gazebo
-            '-x', '0.0',
-            '-y', '0.0',
+            '-x', '-15.0',
+            '-y', '-35.0',
             '-z', '0.5'                    # Spawn it 0.5 meters high (so it drops)
         ],
         output='screen'
