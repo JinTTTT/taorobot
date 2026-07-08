@@ -24,7 +24,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "object_detection_node = semantic_mapping.ros.object_detection_node:main",
+            "perception_node = semantic_mapping.ros.perception_node:main",
         ],
     },
 )

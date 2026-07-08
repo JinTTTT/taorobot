@@ -10,7 +10,9 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>message_filters</exec_depend>
   <!-- ultralytics + torch are installed via pip, not rosdep -->
 
   <test_depend>ament_copyright</test_depend>

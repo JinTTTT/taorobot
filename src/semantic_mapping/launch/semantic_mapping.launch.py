@@ -12,12 +12,12 @@ def generate_launch_description():
         "detection.yaml",
     )
 
-    object_detection_node = Node(
+    perception_node = Node(
         package="semantic_mapping",
-        executable="object_detection_node",
-        name="object_detection_node",
+        executable="perception_node",
+        name="perception_node",
         output="screen",
         parameters=[config],
     )
 
-    return LaunchDescription([object_detection_node])
+    return LaunchDescription([perception_node])
