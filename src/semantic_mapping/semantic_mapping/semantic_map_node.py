@@ -1,7 +1,7 @@
-"""ROS 2 node: build a persistent semantic map from world-frame detections.
+"""Semantic map node: aggregate world-frame detections into a persistent map.
 
-Phase D. Subscribes to /semantic_mapping/detections_3d (already in the map
-frame), associates + fuses each detection into stable objects, and publishes:
+Subscribes to /semantic_mapping/detections_3d, associates + fuses each detection
+into stable objects (see semantic_map.SemanticMap), and publishes:
   /semantic_mapping/map      visualization_msgs/MarkerArray  (persistent, stable IDs)
   /semantic_mapping/objects  vision_msgs/Detection3DArray     (the map as data)
 """
@@ -9,23 +9,19 @@ import colorsys
 
 import rclpy
 from rclpy.node import Node
-from vision_msgs.msg import (
-    Detection3D as Detection3DMsg,
-    Detection3DArray,
-    ObjectHypothesisWithPose,
-)
+from vision_msgs.msg import (Detection3D as Detection3DMsg, Detection3DArray,
+                             ObjectHypothesisWithPose)
 from visualization_msgs.msg import Marker, MarkerArray
 
-from semantic_mapping.mapping.semantic_map import Detection3D, SemanticMap
+from semantic_mapping.semantic_map import Detection3D, SemanticMap
+
+DETECTIONS_TOPIC = "/semantic_mapping/detections_3d"
 
 
 class SemanticMapNode(Node):
-    """Aggregates per-frame 3D detections into a stable semantic map."""
-
     def __init__(self) -> None:
         super().__init__("semantic_map_node")
 
-        self.declare_parameter("input_topic", "/semantic_mapping/detections_3d")
         self.declare_parameter("association_distance", 0.5)
         self.declare_parameter("min_observations", 3)
         self.declare_parameter("same_class_required", False)
@@ -44,13 +40,9 @@ class SemanticMapNode(Node):
             MarkerArray, "/semantic_mapping/map", 10)
         self._objects_pub = self.create_publisher(
             Detection3DArray, "/semantic_mapping/objects", 10)
+        self.create_subscription(
+            Detection3DArray, DETECTIONS_TOPIC, self._on_detections, 10)
 
-        self._sub = self.create_subscription(
-            Detection3DArray,
-            self.get_parameter("input_topic").value,
-            self._on_detections,
-            10,
-        )
         self.get_logger().info("semantic_map_node ready")
 
     def _on_detections(self, msg: Detection3DArray) -> None:
@@ -70,7 +62,6 @@ class SemanticMapNode(Node):
         self._map.prune(stamp)
         self._publish(msg.header.stamp)
 
-    # ------------------------------------------------------------------ #
     def _publish(self, stamp) -> None:
         confirmed = self._map.confirmed()
 
@@ -80,11 +71,9 @@ class SemanticMapNode(Node):
             current_ids.add(obj.id)
             markers.markers.append(self._sphere(obj, stamp))
             markers.markers.append(self._text(obj, stamp))
-
-        # Explicitly delete markers for objects that are no longer present.
-        for old_id in self._published_ids - current_ids:
-            markers.markers.append(self._delete(old_id, "objects"))
-            markers.markers.append(self._delete(old_id, "labels"))
+        for gone_id in self._published_ids - current_ids:
+            markers.markers.append(self._delete(gone_id, "objects"))
+            markers.markers.append(self._delete(gone_id, "labels"))
         self._published_ids = current_ids
 
         self._marker_pub.publish(markers)
@@ -100,43 +89,28 @@ class SemanticMapNode(Node):
             hyp = ObjectHypothesisWithPose()
             hyp.hypothesis.class_id = obj.label
             hyp.hypothesis.score = obj.confidence
-            hyp.pose.pose.position.x = obj.position[0]
-            hyp.pose.pose.position.y = obj.position[1]
-            hyp.pose.pose.position.z = obj.position[2]
+            hyp.pose.pose.position.x, hyp.pose.pose.position.y, hyp.pose.pose.position.z = obj.position
             hyp.pose.pose.orientation.w = 1.0
             d.results.append(hyp)
-            d.bbox.center.position.x = obj.position[0]
-            d.bbox.center.position.y = obj.position[1]
-            d.bbox.center.position.z = obj.position[2]
+            d.bbox.center.position.x, d.bbox.center.position.y, d.bbox.center.position.z = obj.position
             d.bbox.center.orientation.w = 1.0
             d.id = str(obj.id)
             arr.detections.append(d)
         return arr
 
-    # ------------------------------------------------------------------ #
     def _sphere(self, obj, stamp) -> Marker:
-        m = Marker()
-        m.header.frame_id = self._frame_id
-        m.header.stamp = stamp
-        m.ns = "objects"
-        m.id = obj.id
+        m = self._marker(obj.id, "objects", stamp)
         m.type = Marker.SPHERE
         m.action = Marker.ADD
-        m.pose.position.x = obj.position[0]
-        m.pose.position.y = obj.position[1]
-        m.pose.position.z = obj.position[2]
+        m.pose.position.x, m.pose.position.y, m.pose.position.z = obj.position
         m.pose.orientation.w = 1.0
         m.scale.x = m.scale.y = m.scale.z = 0.2
-        r, g, b = _class_color(obj.label)
-        m.color.r, m.color.g, m.color.b, m.color.a = r, g, b, 0.9
+        m.color.r, m.color.g, m.color.b = _class_color(obj.label)
+        m.color.a = 0.9
         return m  # lifetime 0 = persist until updated/deleted
 
     def _text(self, obj, stamp) -> Marker:
-        m = Marker()
-        m.header.frame_id = self._frame_id
-        m.header.stamp = stamp
-        m.ns = "labels"
-        m.id = obj.id
+        m = self._marker(obj.id, "labels", stamp)
         m.type = Marker.TEXT_VIEW_FACING
         m.action = Marker.ADD
         m.pose.position.x = obj.position[0]
@@ -149,11 +123,17 @@ class SemanticMapNode(Node):
         return m
 
     def _delete(self, marker_id, ns) -> Marker:
+        m = self._marker(marker_id, ns, None)
+        m.action = Marker.DELETE
+        return m
+
+    def _marker(self, marker_id, ns, stamp) -> Marker:
         m = Marker()
         m.header.frame_id = self._frame_id
+        if stamp is not None:
+            m.header.stamp = stamp
         m.ns = ns
         m.id = marker_id
-        m.action = Marker.DELETE
         return m
 
 

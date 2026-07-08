@@ -3,11 +3,13 @@
     image_topic: /oakd/rgb/image_raw
     depth_topic: /oakd/stereo/image_raw
     camera_info_topic: /oakd/rgb/camera_info
-    model: yolov8s-seg.pt      # small seg model (more accurate than nano); auto-downloaded
+    model: yolov8s-seg.pt      # segmentation model; auto-downloaded on first run
     device: cuda:0             # RTX 4060; use "cpu" to force CPU
     confidence: 0.4
-    # Restrict to indoor/office COCO classes so implausible labels (aeroplane,
-    # boat, ...) can never win. Empty list ([""]) would allow all 80 classes.
+    target_frame: map          # world frame for objects ("" = camera optical frame)
+    publish_debug_image: true
+    # Restrict to indoor/office COCO classes so implausible labels can't win.
+    # Empty list ([""]) allows all 80 classes.
     class_filter:
       - person
       - chair
@@ -15,11 +17,10 @@
       - potted plant
       - bed
       - dining table
-      - toilet
       - tv
       - laptop
-      - mouse
       - keyboard
+      - mouse
       - cell phone
       - book
       - clock
@@ -32,7 +33,3 @@
       - oven
       - sink
       - backpack
-    publish_debug_image: true
-    min_valid_pixels: 50       # min masked depth pixels to accept a 3D estimate
-    sync_slop: 0.05            # RGB/depth approximate-time tolerance [s]
-    target_frame: map          # world frame to place objects in ("" = optical frame)
