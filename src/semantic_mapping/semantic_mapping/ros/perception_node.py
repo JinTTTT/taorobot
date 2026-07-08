@@ -1,13 +1,14 @@
 """ROS 2 perception node: RGB + depth + camera_info -> 3D object detections.
 
-Single-node Phase B of the semantic-mapping pipeline:
+Single-node Phases B + C of the semantic-mapping pipeline:
   1. YOLO-seg on the RGB image -> boxes, labels, per-pixel masks.
   2. Sample the depth image only on each object's mask pixels (median -> robust
      to hollow objects and background inside the box).
   3. Back-project mask pixels through the pinhole model (camera_info) to a 3D
      centroid in the camera optical frame.
+  4. (Phase C) Transform the centroid into the fixed `target_frame` (map) via tf2.
 
-Outputs (all still in the optical frame; transform to map is Phase C):
+Outputs (in target_frame when the transform is available, else the optical frame):
   /semantic_mapping/detections        vision_msgs/Detection2DArray  (2D, as before)
   /semantic_mapping/detections_3d     vision_msgs/Detection3DArray  (3D centroids)
   /semantic_mapping/markers           visualization_msgs/MarkerArray (RViz)
@@ -19,10 +20,14 @@ import cv2
 import message_filters
 import numpy as np
 import rclpy
+import tf2_geometry_msgs  # noqa: F401  (registers PointStamped transforms)
 from cv_bridge import CvBridge
+from geometry_msgs.msg import PointStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
+from tf2_ros import Buffer, TransformListener
+from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 from vision_msgs.msg import (
     BoundingBox2D,
     Detection2D,
@@ -53,6 +58,8 @@ class PerceptionNode(Node):
         self.declare_parameter("publish_debug_image", True)
         self.declare_parameter("min_valid_pixels", 50)  # need this many masked depths
         self.declare_parameter("sync_slop", 0.05)       # RGB/depth time tolerance [s]
+        # Fixed world frame to place objects in. "" keeps the optical frame.
+        self.declare_parameter("target_frame", "map")
 
         image_topic = self.get_parameter("image_topic").value
         depth_topic = self.get_parameter("depth_topic").value
@@ -60,6 +67,7 @@ class PerceptionNode(Node):
         class_filter = [c for c in self.get_parameter("class_filter").value if c]
         self._publish_debug = self.get_parameter("publish_debug_image").value
         self._min_valid_pixels = int(self.get_parameter("min_valid_pixels").value)
+        self._target_frame = self.get_parameter("target_frame").value
 
         # --- Detector (infrastructure adapter) ---
         self._detector = YoloDetector(
@@ -73,6 +81,11 @@ class PerceptionNode(Node):
         # Pinhole intrinsics, filled from the first camera_info.
         self._fx = self._fy = self._cx = self._cy = None
         self._optical_frame: Optional[str] = None
+
+        # tf2 for transforming object points into the fixed world frame (Phase C).
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._warned_no_tf = False
 
         # --- Publishers ---
         self._det2d_pub = self.create_publisher(
@@ -113,6 +126,37 @@ class PerceptionNode(Node):
         self._cx, self._cy = k[2], k[5]
         self._optical_frame = msg.header.frame_id
 
+    def _resolve_output_frame(self, optical_frame: str) -> str:
+        """Return target_frame if we can transform into it now, else optical."""
+        if not self._target_frame or self._target_frame == optical_frame:
+            return optical_frame
+        if self._tf_buffer.can_transform(
+                self._target_frame, optical_frame, rclpy.time.Time()):
+            self._warned_no_tf = False
+            return self._target_frame
+        if not self._warned_no_tf:
+            self.get_logger().warn(
+                f"No transform {optical_frame} -> {self._target_frame} yet; "
+                f"publishing in {optical_frame}. Is localization running?")
+            self._warned_no_tf = True
+        return optical_frame
+
+    def _transform_point(self, point, src_frame, dst_frame):
+        """Transform an (x, y, z) point from src_frame to dst_frame via tf2."""
+        ps = PointStamped()
+        ps.header.frame_id = src_frame
+        # Latest available transform (stamp left at 0) sidesteps sim-time/TF skew.
+        ps.point.x, ps.point.y, ps.point.z = point
+        try:
+            out = self._tf_buffer.transform(
+                ps, dst_frame, timeout=rclpy.duration.Duration(seconds=0.1))
+        except (LookupException, ConnectivityException, ExtrapolationException) as exc:
+            self.get_logger().warn(
+                f"tf transform {src_frame} -> {dst_frame} failed: {exc}",
+                throttle_duration_sec=2.0)
+            return None
+        return (out.point.x, out.point.y, out.point.z)
+
     def _on_pair(self, rgb_msg: Image, depth_msg: Image) -> None:
         try:
             frame = self._bridge.imgmsg_to_cv2(rgb_msg, desired_encoding="bgr8")
@@ -124,12 +168,17 @@ class PerceptionNode(Node):
 
         detections = self._detector.detect(frame)
         header = rgb_msg.header
+        optical_frame = self._optical_frame or header.frame_id
+
+        # Resolve the output frame once per callback: target_frame if we can
+        # transform into it right now, otherwise fall back to the optical frame.
+        out_frame = self._resolve_output_frame(optical_frame)
 
         det2d = Detection2DArray()
         det2d.header = header
         det3d = Detection3DArray()
         det3d.header = header
-        det3d.header.frame_id = self._optical_frame or header.frame_id
+        det3d.header.frame_id = out_frame
         markers = MarkerArray()
         markers.markers.append(self._delete_all_marker())
 
@@ -140,6 +189,10 @@ class PerceptionNode(Node):
             if point_size is None:
                 continue
             point, extent = point_size
+            if out_frame != optical_frame:
+                point = self._transform_point(point, optical_frame, out_frame)
+                if point is None:
+                    continue
             det3d.detections.append(
                 self._to_detection3d(d, point, extent, det3d.header))
             markers.markers.extend(

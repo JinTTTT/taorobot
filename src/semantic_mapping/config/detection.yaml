@@ -35,3 +35,4 @@
     publish_debug_image: true
     min_valid_pixels: 50       # min masked depth pixels to accept a 3D estimate
     sync_slop: 0.05            # RGB/depth approximate-time tolerance [s]
+    target_frame: map          # world frame to place objects in ("" = optical frame)

@@ -58,6 +58,15 @@ def generate_launch_description():
         output='screen'
     )
 
+    # Sim-only "perfect localizer": publishes map -> odom from ground truth so a
+    # stable `map` frame exists without building/loading an occupancy map.
+    # Replace with real particle-filter localization later (same map -> odom).
+    ground_truth_map_to_odom = Node(
+        package='simulation',
+        executable='ground_truth_map_to_odom',
+        output='screen'
+    )
+
     ground_truth_pose_publisher = Node(
         package='simulation',
         executable='ground_truth_pose_publisher',
@@ -83,4 +92,5 @@ def generate_launch_description():
         ground_truth_pose_publisher,
         odometry_noise_node,       # Injects realistic drift into /odom
         depth_to_mm,               # sim depth (32FC1 m) -> OAK-D format (16UC1 mm)
+        ground_truth_map_to_odom,  # perfect map -> odom so `map` frame exists
     ])

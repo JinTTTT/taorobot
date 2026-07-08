@@ -13,6 +13,9 @@
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>message_filters</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <!-- ultralytics + torch are installed via pip, not rosdep -->
 
   <test_depend>ament_copyright</test_depend>
