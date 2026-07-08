@@ -6,18 +6,24 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    config = os.path.join(
-        get_package_share_directory("semantic_mapping"),
-        "config",
-        "detection.yaml",
-    )
+    pkg = get_package_share_directory("semantic_mapping")
+    detection_config = os.path.join(pkg, "config", "detection.yaml")
+    map_config = os.path.join(pkg, "config", "semantic_map.yaml")
 
     perception_node = Node(
         package="semantic_mapping",
         executable="perception_node",
         name="perception_node",
         output="screen",
-        parameters=[config],
+        parameters=[detection_config],
     )
 
-    return LaunchDescription([perception_node])
+    semantic_map_node = Node(
+        package="semantic_mapping",
+        executable="semantic_map_node",
+        name="semantic_map_node",
+        output="screen",
+        parameters=[map_config],
+    )
+
+    return LaunchDescription([perception_node, semantic_map_node])

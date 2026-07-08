@@ -1,0 +1,7 @@
+/**:
+  ros__parameters:
+    input_topic: /semantic_mapping/detections_3d
+    association_distance: 0.5    # match a detection to an object within this many metres
+    min_observations: 3          # observations before an object is confirmed/published
+    same_class_required: false   # false = mislabelled detections still vote on the object
+    prune_timeout: 0.0           # seconds; 0 = never drop unconfirmed objects
