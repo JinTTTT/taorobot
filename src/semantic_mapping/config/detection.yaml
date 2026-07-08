@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    image_topic: /oakd/rgb/image_raw
+    model: yolov8n.pt          # auto-downloaded on first run
+    device: cuda:0             # RTX 4060; use "cpu" to force CPU
+    confidence: 0.3
+    class_filter: [""]         # empty entry = detect all COCO classes
+    publish_debug_image: true
