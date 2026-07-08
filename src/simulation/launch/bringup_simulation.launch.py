@@ -40,7 +40,21 @@ def generate_launch_description():
             '/scan@sensor_msgs/msg/LaserScan@ignition.msgs.LaserScan',
             # Ground truth world poses: Gazebo -> ROS 2
             '/world/empty/dynamic_pose/info@tf2_msgs/msg/TFMessage[ignition.msgs.Pose_V',
+            # OAK-D RGB: Gazebo -> ROS 2 (matches real TurtleBot 4 oakd topics)
+            '/oakd/rgb/image_raw@sensor_msgs/msg/Image[ignition.msgs.Image',
+            '/oakd/rgb/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo',
+            # OAK-D depth: gz publishes 32FC1 metres on image_float; depth_to_mm
+            # republishes 16UC1 mm on /oakd/stereo/image_raw (real driver format)
+            '/oakd/stereo/image_float@sensor_msgs/msg/Image[ignition.msgs.Image',
+            '/oakd/stereo/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo',
         ],
+        output='screen'
+    )
+
+    # Convert the sim depth (32FC1 m) to the real OAK-D format (16UC1 mm)
+    depth_to_mm = Node(
+        package='simulation',
+        executable='depth_to_mm',
         output='screen'
     )
 
@@ -68,4 +82,5 @@ def generate_launch_description():
         bridge,                    # ROS 2 <-> Gazebo topic bridge
         ground_truth_pose_publisher,
         odometry_noise_node,       # Injects realistic drift into /odom
+        depth_to_mm,               # sim depth (32FC1 m) -> OAK-D format (16UC1 mm)
     ])

@@ -183,6 +183,101 @@
         </sensor>
     </gazebo>
 
+    <!-- ================= OAK-D camera (mirrors TurtleBot 4) ================= -->
+    <!-- Frame tree matches the real robot so topics/TF are drop-in:            -->
+    <!--   base_link -> oakd_link -> oakd_rgb_camera_frame                       -->
+    <!--                          -> oakd_rgb_camera_optical_frame (REP-145)     -->
+    <link name="oakd_link">
+        <visual>
+            <geometry>
+                <box size="0.02 0.09 0.02"/>
+            </geometry>
+            <material name="dark_grey">
+                <color rgba="0.15 0.15 0.15 1"/>
+            </material>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="0.02 0.09 0.02"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="0.05"/>
+            <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+        </inertial>
+    </link>
+
+    <!-- Mount at the front face of base_link (x=0.3), near the top (z=0.05), looking +x -->
+    <joint name="oakd_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="oakd_link"/>
+        <origin xyz="0.30 0 0.05" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Body camera frame: +x forward, aligned with oakd_link -->
+    <link name="oakd_rgb_camera_frame"/>
+    <joint name="oakd_rgb_camera_joint" type="fixed">
+        <parent link="oakd_link"/>
+        <child link="oakd_rgb_camera_frame"/>
+        <origin xyz="0.01 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Optical frame: REP-145 (z forward, x right, y down). This is the frame -->
+    <!-- stamped on Image/CameraInfo and used for pinhole deprojection.          -->
+    <link name="oakd_rgb_camera_optical_frame"/>
+    <joint name="oakd_rgb_camera_optical_joint" type="fixed">
+        <parent link="oakd_rgb_camera_frame"/>
+        <child link="oakd_rgb_camera_optical_frame"/>
+        <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
+    </joint>
+
+    <!-- RGB + depth sensors. Both 640x480 @ ~69deg HFOV so depth pixels align   -->
+    <!-- 1:1 with RGB. Headers stamped with the optical frame via gz_frame_id.    -->
+    <gazebo reference="oakd_rgb_camera_frame">
+        <sensor name="oakd_rgb" type="camera">
+            <always_on>true</always_on>
+            <visualize>true</visualize>
+            <update_rate>15</update_rate>
+            <topic>oakd/rgb/image_raw</topic>
+            <camera_info_topic>oakd/rgb/camera_info</camera_info_topic>
+            <gz_frame_id>oakd_rgb_camera_optical_frame</gz_frame_id>
+            <camera>
+                <horizontal_fov>1.2043</horizontal_fov>  <!-- 69 deg, OAK-D-Pro RGB nominal -->
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R8G8B8</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>15.0</far>
+                </clip>
+            </camera>
+        </sensor>
+
+        <sensor name="oakd_depth" type="depth_camera">
+            <always_on>true</always_on>
+            <update_rate>15</update_rate>
+            <!-- gz publishes 32FC1 metres here; depth_to_mm republishes 16UC1 mm -->
+            <!-- as /oakd/stereo/image_raw to match the real depthai driver.       -->
+            <topic>oakd/stereo/image_float</topic>
+            <camera_info_topic>oakd/stereo/camera_info</camera_info_topic>
+            <gz_frame_id>oakd_rgb_camera_optical_frame</gz_frame_id>
+            <camera>
+                <horizontal_fov>1.2043</horizontal_fov>
+                <image>
+                    <width>640</width>
+                    <height>480</height>
+                    <format>R_FLOAT32</format>
+                </image>
+                <clip>
+                    <near>0.1</near>
+                    <far>15.0</far>
+                </clip>
+            </camera>
+        </sensor>
+    </gazebo>
+
 
     <!-- Diff Drive Plugin to move robot-->
     <gazebo>
