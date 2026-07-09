@@ -63,12 +63,29 @@ class SemanticMap:
         self._next_id = 0
 
     def update(self, detections: List[Detection3D], stamp: float) -> None:
-        for det in detections:
-            obj = self._match(det)
+        # MATCH: pair detections to objects that existed *before* this frame.
+        # `available` is a frozen snapshot; each object can be claimed only once,
+        # so a detection can never match an object born earlier in the same frame.
+        available = list(self.objects)
+        matches: List[Tuple[SemanticObject, Detection3D]] = []
+        newborns: List[Detection3D] = []
+        for det in sorted(detections, key=lambda d: d.score, reverse=True):
+            obj = self._match(det, available)
             if obj is None:
-                obj = SemanticObject(id=self._next_id, position=det.position)
-                self._next_id += 1
-                self.objects.append(obj)
+                newborns.append(det)
+            else:
+                available.remove(obj)  # claimed: off the table for the rest of this frame
+                matches.append((obj, det))
+
+        # UPDATE: matched objects absorb their detection.
+        for obj, det in matches:
+            self._fuse(obj, det, stamp)
+
+        # BIRTH: leftover detections become brand-new objects.
+        for det in newborns:
+            obj = SemanticObject(id=self._next_id, position=det.position)
+            self._next_id += 1
+            self.objects.append(obj)
             self._fuse(obj, det, stamp)
 
     def confirmed(self) -> List[SemanticObject]:
@@ -88,9 +105,11 @@ class SemanticMap:
         self.objects = kept
         return removed
 
-    def _match(self, det: Detection3D) -> Optional[SemanticObject]:
+    def _match(
+        self, det: Detection3D, candidates: List[SemanticObject]
+    ) -> Optional[SemanticObject]:
         best, best_d = None, self.association_distance
-        for o in self.objects:
+        for o in candidates:
             if self.same_class_required and o.label != det.label:
                 continue
             d = _distance(o.position, det.position)
