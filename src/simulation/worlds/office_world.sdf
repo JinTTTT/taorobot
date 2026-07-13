@@ -82,5 +82,40 @@
       <pose>15 35 0 0 0 0</pose>
     </include>
 
+    <!-- Detectable objects for semantic mapping (Gazebo Fuel models),
+         placed around the robot spawn at the origin. Keep same-class
+         objects > 0.8 m apart or the map merges them (reuse radius). -->
+    <include>
+      <uri>model://chair</uri>
+      <name>armchair</name>
+      <pose>2.5 0.5 0 0 0 3.14</pose>
+    </include>
+    <include>
+      <uri>model://wooden_chair</uri>
+      <name>wooden_chair</name>
+      <pose>2.0 -1.5 0 0 0 2.5</pose>
+    </include>
+    <include>
+      <uri>model://office_chair_black</uri>
+      <name>office_chair</name>
+      <pose>-1.5 2.0 0 0 0 -0.8</pose>
+    </include>
+    <include>
+      <uri>model://sofa</uri>
+      <name>sofa</name>
+      <pose>0.5 3.0 0 0 0 -1.57</pose>
+    </include>
+    <include>
+      <uri>model://person</uri>
+      <name>person</name>
+      <static>true</static>
+      <pose>0 -1.5 0 0 0 1.57</pose>
+    </include>
+    <include>
+      <uri>model://book</uri>
+      <name>book</name>
+      <pose>1.5 1.5 0.02 0 0 0.5</pose>
+    </include>
+
   </world>
 </sdf>

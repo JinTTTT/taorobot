@@ -12,10 +12,13 @@ def generate_launch_description():
     pkg_path = get_package_share_directory('simulation')
     urdf_file = os.path.join(pkg_path, 'urdf', 'my_robot.urdf')
 
+    # `models/objs` holds downloaded Fuel objects (chairs, tables, ...);
+    # it must be on the path so `model://<name>` resolves by directory name.
     models_path = os.path.join(pkg_path, 'models')
+    objs_path = os.path.join(models_path, 'objs')
     gazebo_model_path_env = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH',
-        models_path
+        f'{models_path}:{objs_path}'
     )
 
     # 2. CONFIG: Read the URDF file specifically
