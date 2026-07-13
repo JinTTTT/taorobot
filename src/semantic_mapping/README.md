@@ -1,75 +1,63 @@
 # semantic_mapping
 
-Builds a **semantic map**: the robot's camera detects objects, places them in 3D,
-and remembers them as stable, labeled entries in the world frame.
+Builds a **semantic map**: the camera detects objects, places them in 3D, and
+remembers them as stable, labeled entries in the `map` frame.
 
-## Mental model
+Association and memory follow **Razavi et al., "Online Object-Level Semantic
+Mapping for Quadrupeds in Real-World Environments"** (`docs/`), with the same
+parameter values (their Table I).
 
-A camera sees objects *per frame*. A map *remembers* them. This package bridges
-the two — detect what's in view, work out where it is in the world, and fuse
-repeated sightings of the same thing into one persistent object.
+## Pipeline
 
 ```
   RGB + depth + camera_info
         │
         ▼
-  ┌─────────────────────────── perception_node ───────────────────────────┐
-  │ 1. detect     YOLO-seg → box, label, per-pixel mask                    │
-  │ 2. deproject  sample depth on the mask → 3D centroid (camera frame)    │
-  │ 3. to map     tf2 transform  camera → map                             │
-  └───────────────────────────────┬───────────────────────────────────────┘
-                                   │  /semantic_mapping/detections_3d  (per frame)
+  ┌────────────────────────── perception_node ────────────────────────────┐
+  │ detect (YOLO-seg) → sample depth on mask → deproject → tf2 → map frame │
+  └───────────────────────────────┬────────────────────────────────────────┘
+                                   │  /semantic_mapping/detections_3d
                                    ▼
-  ┌───────────────────────── semantic_map_node ──────────────────────────┐
-  │ 4. fuse       match to known object (distance gate) or spawn new;     │
-  │               average position, vote on class, confirm after N hits   │
-  └───────────────────────────────┬───────────────────────────────────────┘
-                                   │  /semantic_mapping/map   (persistent)
+  ┌───────────────────────── semantic_map_node ───────────────────────────┐
+  │ filter    drop score < 0.65; flatten to map plane (z = 0)              │
+  │ merge     same class within 0.20 m in one frame → keep highest score   │
+  │ associate same-class nearest neighbour within 0.80 m:                  │
+  │             long-term hit  → count++, position stays frozen            │
+  │             short-term hit → update candidate position                 │
+  │             no hit         → new short-term candidate                  │
+  │ promote   ≥10 hits in 2.0 s at mean score ≥0.50 → confirmed (forever)  │
+  └───────────────────────────────┬────────────────────────────────────────┘
                                    ▼
-                              RViz / downstream
+                    /semantic_mapping/map  (persistent, RViz)
 ```
+
+Two memories: a **short-term buffer** of candidates (positions update, stale
+ones discarded after 2.0 s) and a **long-term list** of confirmed objects
+(positions frozen, never removed). Detections match against a frozen per-frame
+snapshot — one detection per record per frame — so two chairs seen together
+can't collapse into one, and a single frame can't double-count hits.
+
+Note: 10 hits in 2.0 s requires a **> 5 Hz** detection stream (ours: ~13 Hz).
 
 ## Structure
 
 ```
-semantic_mapping/
-  yolo_detector.py      # ROS-free: YOLO-seg adapter → Detection(box, label, mask)
-  perception_node.py    # ROS node: detect → deproject → tf2 → publish
-  semantic_map.py       # ROS-free: association + fusion (SemanticMap)
-  semantic_map_node.py  # ROS node: aggregate detections into a persistent map
-  config/perception.yaml
-  config/semantic_map.yaml
-  launch/semantic_mapping.launch.py
+  yolo_detector.py      # ROS-free: YOLO-seg adapter
+  perception_node.py    # ROS glue: detect → deproject → tf2 → publish
+  semantic_map.py       # ROS-free: association + memory
+  semantic_map_node.py  # ROS glue: detections → persistent map
 ```
 
-**Design rule:** the two *logic* modules (`yolo_detector`, `semantic_map`) are
-pure Python with no ROS imports, so they're easy to test and swap. The `*_node`
-files are thin ROS glue around them.
+Logic modules are pure Python (no ROS imports): easy to test and swap.
 
 ## Topics
 
 | Topic | Type | By |
 |---|---|---|
-| `/oakd/rgb/image_raw`, `/oakd/stereo/image_raw`, `/oakd/rgb/camera_info` | Image / CameraInfo | *(in)* |
 | `/semantic_mapping/detections_3d` | `vision_msgs/Detection3DArray` | perception (per-frame) |
-| `/semantic_mapping/detections_image` | `sensor_msgs/Image` | perception (debug overlay) |
-| `/semantic_mapping/map` | `visualization_msgs/MarkerArray` | map (persistent, RViz) |
-| `/semantic_mapping/objects` | `vision_msgs/Detection3DArray` | map (persistent, data) |
-
-## Key concepts
-
-- **Mask depth sampling** — depth is read only on the object's segmentation mask
-  (not the whole box), so hollow objects and background don't corrupt the estimate.
-- **Pinhole deprojection** — `X = (u−cx)·Z/fx`, `Y = (v−cy)·Z/fy` turns a pixel +
-  depth into a 3D point using `camera_info`.
-- **World anchoring** — tf2 moves the point from the camera frame into `map`, so
-  it stays fixed as the robot moves.
-- **Data association** — a new detection joins the nearest existing object within
-  a distance gate, else starts a new one.
-- **Fusion** — position by running mean (converges), class by score-weighted
-  **majority vote** (self-corrects one-off misclassifications).
-- **Confirmation** — an object is only published after N observations, so
-  one-frame false positives never reach the map.
+| `/semantic_mapping/detections_image` | `sensor_msgs/Image` | perception (debug) |
+| `/semantic_mapping/map` | `visualization_msgs/MarkerArray` | map (persistent) |
+| `/semantic_mapping/objects` | `vision_msgs/Detection3DArray` | map (persistent) |
 
 ## Run
 
@@ -77,23 +65,23 @@ files are thin ROS glue around them.
 ros2 launch simulation bringup_simulation.launch.py       # camera + map frame
 ros2 launch semantic_mapping semantic_mapping.launch.py    # perception + map
 ```
-In RViz: Fixed Frame `map`, add a MarkerArray on `/semantic_mapping/map`, and set
-the view's Target Frame to `base_link` so the camera follows the robot.
+
+RViz: Fixed Frame `map`, MarkerArray on `/semantic_mapping/map`. The map
+origin is the robot's spawn point.
+
+## Deviations from the paper
+
+- **Localization**: ground-truth `map→odom` shim in sim instead of SLAM
+  Toolbox; swappable with zero changes here.
+- **Detector**: YOLOv8s-seg with mask depth sampling instead of YOLOv11n box
+  centers (their stated limitation). Keep a `-seg` model — detections without
+  masks are skipped.
 
 ## Shortcomings
 
-- **Misclassification** — YOLO on synthetic sim images has a domain gap; voting
-  hides one-off errors but not systematic ones.
-- **Co-located objects merge** — association is position-based, so e.g. a vase on
-  a chair can collapse into one object (set `same_class_required: true` to reduce).
-- **Position only** — objects have a location, not an orientation or true size.
-- **Localization is faked in sim** — the `map` frame comes from a ground-truth
-  `map→odom` shim, not real localization.
-
-## Further improvements
-
-- Swap the ground-truth shim for real particle-filter localization on a built map.
-- Instance features (not just class + position) to tell apart co-located objects.
-- Persist the map to disk (save / reload across runs).
-- A custom `SemanticObject` message for richer downstream use.
-- Per-object Kalman filtering if positions get noisy on the real robot.
+- Confirmed positions are frozen; a bad first viewing angle is never corrected.
+- Confirmed false positives stay forever (long-term is never pruned).
+- Association is geometric only; identical objects within 0.80 m merge.
+- Objects have no orientation or size (a YOLO box carries neither).
+- Sim scores run lower than real-camera scores; with the 0.65 cutoff some
+  detected objects may never enter the map.
