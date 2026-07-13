@@ -43,8 +43,8 @@ def generate_launch_description():
         arguments=[
             '-topic', 'robot_description', # The topic where the URDF is published
             '-name', 'my_first_robot',     # The name it will have in Gazebo
-            '-x', '-15.0',
-            '-y', '-35.0',
+            '-x', '0.0',                   # world origin = spawn spot (office
+            '-y', '0.0',                   # world is shifted to match)
             '-z', '0.5'                    # Spawn it 0.5 meters high (so it drops)
         ],
         output='screen'

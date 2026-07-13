@@ -22,16 +22,23 @@ class SemanticMapNode(Node):
     def __init__(self) -> None:
         super().__init__("semantic_map_node")
 
-        self.declare_parameter("association_distance", 0.5)
-        self.declare_parameter("min_observations", 3)
-        self.declare_parameter("same_class_required", False)
-        self.declare_parameter("prune_timeout", 0.0)  # 0 = never prune
+        self.declare_parameter("min_score", 0.65)
+        self.declare_parameter("merge_radius", 0.20)
+        self.declare_parameter("reuse_radius", 0.80)
+        self.declare_parameter("promotion_hits", 10)
+        self.declare_parameter("promotion_window", 2.0)
+        self.declare_parameter("promotion_mean_score", 0.50)
+        self.declare_parameter("candidate_timeout", 2.0)
 
         self._map = SemanticMap(
-            association_distance=self.get_parameter("association_distance").value,
-            min_observations=int(self.get_parameter("min_observations").value),
-            same_class_required=self.get_parameter("same_class_required").value,
-            prune_timeout=float(self.get_parameter("prune_timeout").value),
+            min_score=float(self.get_parameter("min_score").value),
+            merge_radius=float(self.get_parameter("merge_radius").value),
+            reuse_radius=float(self.get_parameter("reuse_radius").value),
+            promotion_hits=int(self.get_parameter("promotion_hits").value),
+            promotion_window=float(self.get_parameter("promotion_window").value),
+            promotion_mean_score=float(
+                self.get_parameter("promotion_mean_score").value),
+            candidate_timeout=float(self.get_parameter("candidate_timeout").value),
         )
         self._frame_id = "map"
         self._published_ids: set = set()
@@ -56,7 +63,9 @@ class SemanticMapNode(Node):
                 continue
             hyp = d.results[0].hypothesis
             p = d.bbox.center.position
-            dets.append(Detection3D(hyp.class_id, hyp.score, (p.x, p.y, p.z)))
+            # The semantic map is 2D (paper: z set to 0, association on the
+            # map plane), so the height is dropped here.
+            dets.append(Detection3D(hyp.class_id, hyp.score, (p.x, p.y, 0.0)))
 
         self._map.update(dets, stamp)
         self._map.prune(stamp)
@@ -104,7 +113,7 @@ class SemanticMapNode(Node):
         m.action = Marker.ADD
         m.pose.position.x, m.pose.position.y, m.pose.position.z = obj.position
         m.pose.orientation.w = 1.0
-        m.scale.x = m.scale.y = m.scale.z = 0.2
+        m.scale.x = m.scale.y = m.scale.z = 0.8
         m.color.r, m.color.g, m.color.b = _class_color(obj.label)
         m.color.a = 0.9
         return m  # lifetime 0 = persist until updated/deleted
@@ -114,12 +123,12 @@ class SemanticMapNode(Node):
         m.type = Marker.TEXT_VIEW_FACING
         m.action = Marker.ADD
         m.pose.position.x = obj.position[0]
-        m.pose.position.y = obj.position[1] - 0.25
-        m.pose.position.z = obj.position[2]
+        m.pose.position.y = obj.position[1]
+        m.pose.position.z = obj.position[2] + 0.9  # float above the sphere
         m.pose.orientation.w = 1.0
-        m.scale.z = 0.14
+        m.scale.z = 0.5
         m.color.r = m.color.g = m.color.b = m.color.a = 1.0
-        m.text = f"{obj.label} #{obj.observations}"
+        m.text = f"{obj.label} #{obj.count}"
         return m
 
     def _delete(self, marker_id, ns) -> Marker:

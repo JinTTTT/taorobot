@@ -74,10 +74,12 @@
       </link>
     </model>
 
-    <!-- Include the imported office scene (see models/office/) -->
+    <!-- Include the imported office scene (see models/office/).
+         Shifted +15 +35 so the robot's spawn spot (formerly world
+         (-15, -35)) sits at the world origin: world = map = spawn. -->
     <include>
       <uri>model://office</uri>
-      <pose>0 0 0 0 0 0</pose>
+      <pose>15 35 0 0 0 0</pose>
     </include>
 
   </world>
