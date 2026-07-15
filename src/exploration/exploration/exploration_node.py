@@ -5,22 +5,21 @@ otherwise clicks "2D Goal Pose" in RViz. Each cycle it reads the live map,
 finds the edges between known-free and unknown space (frontiers), and sends the
 robot to the nearest one; when no frontier is left, the map is complete.
 
-Progress so far:
-  step 1  find frontier cells        done
-  step 2  group cells into clusters  <- this version
-  step 3  pick the nearest cluster
-  step 4  publish it as a goal pose
+The loop:
+  step 1  find frontier cells        free cells touching unknown space
+  step 2  group cells into clusters  flood fill, one cluster per opening
+  step 3  pick the nearest cluster   snap to a real cell, rank by distance
+  step 4  publish it as a goal pose  facing into the unknown
 
 A frontier cell is a *free* cell that touches at least one *unknown* cell --
-the edge of the mapped area, i.e. "a doorway into the dark". Individual cells
-are then grouped (flood fill) into clusters, one per distinct opening.
+the edge of the mapped area, i.e. "a doorway into the dark".
 
 Subscribes:
   /map                    nav_msgs/OccupancyGrid   the growing map
 
 Publishes:
-  /exploration/clusters   visualization_msgs/MarkerArray  colored clusters (RViz)
-  /goal_pose              geometry_msgs/PoseStamped        next goal (added later)
+  /goal_pose              geometry_msgs/PoseStamped        next frontier goal
+  /exploration/clusters   visualization_msgs/MarkerArray   colored clusters (RViz)
 """
 import math
 from collections import deque
@@ -223,7 +222,22 @@ class ExplorationNode(Node):
             f"({len(clusters[chosen])} cells) at ({goal.x:.2f}, {goal.y:.2f}), "
             f"{dist:.2f} m away")
 
+        self._publish_goal(goal, robot_xy)
         self._publish_cluster_markers(clusters, info, chosen, goal, robot_xy)
+
+    # --- step 4: publish the goal pose ------------------------------------
+
+    def _publish_goal(self, goal: Point, robot_xy: Tuple[float, float]) -> None:
+        """Send the chosen frontier as a PoseStamped, facing into the unknown
+        (yaw points from the robot toward the goal, i.e. the travel direction)."""
+        yaw = math.atan2(goal.y - robot_xy[1], goal.x - robot_xy[0])
+        msg = PoseStamped()
+        msg.header.frame_id = self._map_frame
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.position = goal
+        msg.pose.orientation.z = math.sin(yaw / 2.0)
+        msg.pose.orientation.w = math.cos(yaw / 2.0)
+        self._goal_pub.publish(msg)
 
     # --- visualization ----------------------------------------------------
 
