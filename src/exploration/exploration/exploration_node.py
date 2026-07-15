@@ -170,13 +170,37 @@ class ExplorationNode(Node):
 
         return clusters
 
+    # --- step 3: pick the nearest cluster --------------------------------
+
+    def _cluster_goal(self, cluster: Cluster, info: MapMetaData) -> Point:
+        """The cluster's goal point: its centroid snapped to the nearest real
+        frontier cell, so the goal is always a valid (free) cell rather than an
+        averaged point that could fall on a wall for a curved cluster.
+        """
+        mean = cluster.mean(axis=0)                       # (mean_row, mean_col)
+        nearest = cluster[((cluster - mean) ** 2).sum(axis=1).argmin()]
+        row, col = int(nearest[0]), int(nearest[1])
+        return self._cell_center(col, row, info)
+
+    def _select_nearest(self, clusters: List[Cluster], robot_xy: Tuple[float, float],
+                        info: MapMetaData) -> Tuple[int, Point, float]:
+        """Index, goal point, and straight-line distance of the closest cluster."""
+        best_index, best_goal, best_dist = 0, None, float("inf")
+        for i, cluster in enumerate(clusters):
+            goal = self._cluster_goal(cluster, info)
+            dist = math.hypot(goal.x - robot_xy[0], goal.y - robot_xy[1])
+            if dist < best_dist:
+                best_index, best_goal, best_dist = i, goal, dist
+        return best_index, best_goal, best_dist
+
     # --- main loop --------------------------------------------------------
 
     def _explore_once(self) -> None:
         if self._map is None:
             self.get_logger().warn("waiting for /map ...", throttle_duration_sec=5.0)
             return
-        if self._robot_pose() is None:
+        pose = self._robot_pose()
+        if pose is None:
             self.get_logger().warn(
                 f"waiting for TF {self._map_frame} -> {self._robot_frame} ...",
                 throttle_duration_sec=5.0)
@@ -184,28 +208,35 @@ class ExplorationNode(Node):
 
         grid = np.array(self._map.data, dtype=np.int8).reshape(
             self._map.info.height, self._map.info.width)
+        info = self._map.info
 
-        frontier = self._frontier_mask(grid)
-        clusters = self._cluster_frontiers(frontier)
+        clusters = self._cluster_frontiers(self._frontier_mask(grid))
+        if not clusters:
+            self.get_logger().info("no frontiers left - map complete")
+            self._cluster_pub.publish(MarkerArray(markers=[self._delete_all_marker()]))
+            return
 
-        largest = max((len(c) for c in clusters), default=0)
+        robot_xy = (pose[0], pose[1])
+        chosen, goal, dist = self._select_nearest(clusters, robot_xy, info)
         self.get_logger().info(
-            f"{len(clusters)} clusters (>= {self._min_cluster_size} cells), "
-            f"largest = {largest} cells")
+            f"{len(clusters)} clusters | nearest = #{chosen} "
+            f"({len(clusters[chosen])} cells) at ({goal.x:.2f}, {goal.y:.2f}), "
+            f"{dist:.2f} m away")
 
-        self._publish_cluster_markers(clusters, self._map.info)
+        self._publish_cluster_markers(clusters, info, chosen, goal, robot_xy)
 
     # --- visualization ----------------------------------------------------
 
-    def _publish_cluster_markers(self, clusters: List[Cluster],
-                                 info: MapMetaData) -> None:
-        """Draw one colored dot per cluster at its centroid, labelled with size."""
+    def _publish_cluster_markers(self, clusters: List[Cluster], info: MapMetaData,
+                                 chosen: int, goal: Point,
+                                 robot_xy: Tuple[float, float]) -> None:
+        """Draw one colored dot per cluster (labelled with size), plus a green
+        goal marker on the chosen cluster and a line from the robot to it."""
         markers = [self._delete_all_marker()]
 
         for i, cluster in enumerate(clusters):
             color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
-            mean_row, mean_col = cluster.mean(axis=0)
-            center = self._cell_center(mean_col, mean_row, info)
+            center = self._cluster_goal(cluster, info)
 
             dot = Marker()
             self._init_marker(dot, "centroids", Marker.SPHERE, i, 0.3)
@@ -219,6 +250,19 @@ class ExplorationNode(Node):
             label.pose.position = Point(x=center.x, y=center.y, z=0.4)
             label.text = str(len(cluster))
             markers.append(label)
+
+        # Highlight the chosen goal and draw the robot -> goal line.
+        goal_dot = Marker()
+        self._init_marker(goal_dot, "goal", Marker.SPHERE, 0, 0.5)
+        goal_dot.color.g = 1.0   # bright green
+        goal_dot.pose.position = goal
+        markers.append(goal_dot)
+
+        line = Marker()
+        self._init_marker(line, "goal_line", Marker.LINE_STRIP, 0, 0.05)
+        line.color.g = 1.0
+        line.points = [Point(x=robot_xy[0], y=robot_xy[1], z=0.0), goal]
+        markers.append(line)
 
         self._cluster_pub.publish(MarkerArray(markers=markers))
 
