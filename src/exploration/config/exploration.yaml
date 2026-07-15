@@ -5,3 +5,6 @@
     map_frame: map
     robot_frame: base_link
     planning_period_s: 2.0   # how often to re-pick a frontier goal
+    free_threshold: 45       # occupancy 0..this = drivable free cell (unknown is -1)
+                             # freshly ray-traced free cells sit ~35, so keep this
+                             # above that but below occupied (~70)
