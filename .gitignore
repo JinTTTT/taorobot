@@ -9,3 +9,6 @@ AGENTS.md
 
 # video sources for docs (GIFs are committed instead)
 docs/media/*.mp4
+
+# python bytecode
+__pycache__/

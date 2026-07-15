@@ -8,10 +8,12 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -47,9 +49,32 @@ ament_target_dependencies(odometry_noise_node
   nav_msgs
 )
 
+add_executable(depth_to_mm
+  src/depth_to_mm.cpp
+)
+
+ament_target_dependencies(depth_to_mm
+  rclcpp
+  sensor_msgs
+)
+
+add_executable(ground_truth_map_to_odom
+  src/ground_truth_map_to_odom.cpp
+)
+
+ament_target_dependencies(ground_truth_map_to_odom
+  rclcpp
+  tf2
+  tf2_ros
+  tf2_msgs
+  geometry_msgs
+)
+
 install(TARGETS
   ground_truth_pose_publisher
   odometry_noise_node
+  depth_to_mm
+  ground_truth_map_to_odom
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,0 +1,121 @@
+<?xml version="1.0"?>
+<!-- Office world: same Fortress/Humble header as my_world.sdf (world name
+     "empty" is required -- the ros_gz bridge in bringup_simulation.launch.py
+     and ground_truth_pose_publisher.cpp both hardcode /world/empty/...), with
+     the simple_room maze swapped for the imported office scene (model://office).
+     Meshes came from the APP-RAS (Jazzy) project but are geometry-only, so they
+     load unchanged here; only the world header must stay Fortress-compatible. -->
+<sdf version="1.6">
+  <world name="empty">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin
+      filename="ignition-gazebo-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-contact-system"
+      name="gz::sim::systems::Contact">
+    </plugin>
+    <plugin
+      filename="ignition-gazebo-sensors-system"
+      name="gz::sim::systems::Sensors">
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Include the imported office scene (see models/office/).
+         Shifted +15 +35 so the robot's spawn spot (formerly world
+         (-15, -35)) sits at the world origin: world = map = spawn. -->
+    <include>
+      <uri>model://office</uri>
+      <pose>15 35 0 0 0 0</pose>
+    </include>
+
+    <!-- Detectable objects for semantic mapping (Gazebo Fuel models),
+         placed around the robot spawn at the origin. Keep same-class
+         objects > 0.8 m apart or the map merges them (reuse radius). -->
+    <include>
+      <uri>model://chair</uri>
+      <name>armchair</name>
+      <pose>2.5 0.5 0 0 0 3.14</pose>
+    </include>
+    <include>
+      <uri>model://wooden_chair</uri>
+      <name>wooden_chair</name>
+      <pose>2.0 -1.5 0 0 0 2.5</pose>
+    </include>
+    <include>
+      <uri>model://office_chair_black</uri>
+      <name>office_chair</name>
+      <pose>-1.5 2.0 0 0 0 -0.8</pose>
+    </include>
+    <include>
+      <uri>model://sofa</uri>
+      <name>sofa</name>
+      <pose>0.5 3.0 0 0 0 -1.57</pose>
+    </include>
+    <include>
+      <uri>model://person</uri>
+      <name>person</name>
+      <static>true</static>
+      <pose>0 -1.5 0 0 0 1.57</pose>
+    </include>
+    <include>
+      <uri>model://book</uri>
+      <name>book</name>
+      <pose>1.5 1.5 0.02 0 0 0.5</pose>
+    </include>
+
+  </world>
+</sdf>

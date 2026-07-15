@@ -1,0 +1,34 @@
+/**:
+  ros__parameters:
+    image_topic: /oakd/rgb/image_raw
+    depth_topic: /oakd/stereo/image_raw
+    camera_info_topic: /oakd/rgb/camera_info
+    model: yolov8s-seg.pt      # segmentation model; auto-downloaded on first run
+    device: cuda:0             # RTX 4060; use "cpu" to force CPU
+    confidence: 0.4
+    target_frame: map          # world frame for objects ("" = camera optical frame)
+    publish_debug_image: true
+    # Restrict to indoor/office COCO classes so implausible labels can't win.
+    # Empty list ([""]) allows all 80 classes.
+    class_filter:
+      - person
+      - chair
+      - couch
+      - bed
+      - dining table
+      - tv
+      - laptop
+      - keyboard
+      - mouse
+      - cell phone
+      - book
+      - clock
+      - vase
+      - bottle
+      - cup
+      - bowl
+      - refrigerator
+      - microwave
+      - oven
+      - sink
+      - backpack

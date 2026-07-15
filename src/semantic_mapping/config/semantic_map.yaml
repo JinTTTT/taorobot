@@ -1,0 +1,10 @@
+/**:
+  ros__parameters:
+    # Association + memory settings from Razavi et al. (Table I).
+    min_score: 0.65             # per-class confidence cutoff
+    merge_radius: 0.20          # same-frame duplicate merge radius [m]
+    reuse_radius: 0.80          # association (reuse) radius on the map [m]
+    promotion_hits: 10          # hits needed to confirm an object ...
+    promotion_window: 2.0       # ... within this many seconds ...
+    promotion_mean_score: 0.50  # ... at at least this mean confidence
+    candidate_timeout: 2.0      # discard unseen short-term candidates [s]
