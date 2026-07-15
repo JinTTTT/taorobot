@@ -8,3 +8,4 @@
     free_threshold: 45       # occupancy 0..this = drivable free cell (unknown is -1)
                              # freshly ray-traced free cells sit ~35, so keep this
                              # above that but below occupied (~70)
+    min_cluster_size: 5      # drop frontier clusters smaller than this many cells

@@ -6,28 +6,30 @@ finds the edges between known-free and unknown space (frontiers), and sends the
 robot to the nearest one; when no frontier is left, the map is complete.
 
 Progress so far:
-  step 1  find frontier cells        <- this version
-  step 2  group cells into clusters
+  step 1  find frontier cells        done
+  step 2  group cells into clusters  <- this version
   step 3  pick the nearest cluster
   step 4  publish it as a goal pose
 
 A frontier cell is a *free* cell that touches at least one *unknown* cell --
-the edge of the mapped area, i.e. "a doorway into the dark".
+the edge of the mapped area, i.e. "a doorway into the dark". Individual cells
+are then grouped (flood fill) into clusters, one per distinct opening.
 
 Subscribes:
-  /map                         nav_msgs/OccupancyGrid   the growing map
+  /map                    nav_msgs/OccupancyGrid   the growing map
 
 Publishes:
-  /exploration/frontier_cells  visualization_msgs/MarkerArray  frontier cells (RViz)
-  /goal_pose                   geometry_msgs/PoseStamped        next goal (added later)
+  /exploration/clusters   visualization_msgs/MarkerArray  colored clusters (RViz)
+  /goal_pose              geometry_msgs/PoseStamped        next goal (added later)
 """
 import math
-from typing import Optional, Tuple
+from collections import deque
+from typing import List, Optional, Tuple
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, PoseStamped
-from nav_msgs.msg import OccupancyGrid, MapMetaData
+from nav_msgs.msg import MapMetaData, OccupancyGrid
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile
 from tf2_ros import (Buffer, ConnectivityException, ExtrapolationException,
@@ -35,8 +37,21 @@ from tf2_ros import (Buffer, ConnectivityException, ExtrapolationException,
 from visualization_msgs.msg import Marker, MarkerArray
 
 Pose2D = Tuple[float, float, float]   # (x, y, yaw) in the map frame
+Cluster = np.ndarray                  # (K, 2) array of (row, col) cell indices
 
 UNKNOWN = -1   # OccupancyGrid value for a never-observed cell
+
+# 8-connectivity: a cell's neighbours include diagonals, so a frontier strip
+# stays in one piece instead of splitting apart.
+NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1),
+              (0, 1), (1, -1), (1, 0), (1, 1)]
+
+# Distinct colors cycled per cluster so each opening is a different blob in RViz.
+CLUSTER_COLORS = [
+    (0.90, 0.10, 0.10), (0.10, 0.60, 0.90), (0.20, 0.80, 0.20),
+    (0.95, 0.75, 0.05), (0.60, 0.20, 0.80), (0.95, 0.45, 0.10),
+    (0.10, 0.80, 0.75), (0.95, 0.35, 0.65),
+]
 
 
 class ExplorationNode(Node):
@@ -51,10 +66,13 @@ class ExplorationNode(Node):
         # A cell counts as free (drivable) when its occupancy is in [0, threshold].
         # Mapped-free cells settle low; walls settle high; unknown is -1.
         self.declare_parameter("free_threshold", 45)
+        # Frontier clusters smaller than this many cells are ignored as noise.
+        self.declare_parameter("min_cluster_size", 5)
 
         self._map_frame = self.get_parameter("map_frame").value
         self._robot_frame = self.get_parameter("robot_frame").value
         self._free_threshold = self.get_parameter("free_threshold").value
+        self._min_cluster_size = self.get_parameter("min_cluster_size").value
 
         # The map is latched (transient local), so match it or we miss the map
         # that was published before this node started.
@@ -67,8 +85,8 @@ class ExplorationNode(Node):
 
         self._goal_pub = self.create_publisher(
             PoseStamped, self.get_parameter("goal_topic").value, 1)
-        self._frontier_pub = self.create_publisher(
-            MarkerArray, "/exploration/frontier_cells", 1)
+        self._cluster_pub = self.create_publisher(
+            MarkerArray, "/exploration/clusters", 1)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -119,6 +137,39 @@ class ExplorationNode(Node):
 
         return free & neighbour_unknown
 
+    # --- step 2: cluster the cells ---------------------------------------
+
+    def _cluster_frontiers(self, mask: np.ndarray) -> List[Cluster]:
+        """Group touching frontier cells into clusters via flood fill.
+
+        Each unvisited frontier cell seeds a new cluster; a breadth-first flood
+        pulls in every connected frontier neighbour until the blob is complete.
+        Clusters smaller than `min_cluster_size` are dropped as noise.
+        """
+        h, w = mask.shape
+        visited = np.zeros_like(mask, dtype=bool)
+        clusters: List[Cluster] = []
+
+        rows, cols = np.where(mask)
+        for r0, c0 in zip(rows, cols):
+            if visited[r0, c0]:
+                continue
+            cells = []
+            queue = deque([(r0, c0)])
+            visited[r0, c0] = True
+            while queue:
+                r, c = queue.popleft()
+                cells.append((r, c))
+                for dr, dc in NEIGHBOURS:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < h and 0 <= nc < w and mask[nr, nc] and not visited[nr, nc]:
+                        visited[nr, nc] = True
+                        queue.append((nr, nc))
+            if len(cells) >= self._min_cluster_size:
+                clusters.append(np.array(cells))
+
+        return clusters
+
     # --- main loop --------------------------------------------------------
 
     def _explore_once(self) -> None:
@@ -135,35 +186,62 @@ class ExplorationNode(Node):
             self._map.info.height, self._map.info.width)
 
         frontier = self._frontier_mask(grid)
-        rows, cols = np.where(frontier)   # cell (col=x, row=y) grid coordinates
-        self.get_logger().info(f"{len(cols)} frontier cells")
+        clusters = self._cluster_frontiers(frontier)
 
-        self._publish_frontier_markers(cols, rows, self._map.info)
+        largest = max((len(c) for c in clusters), default=0)
+        self.get_logger().info(
+            f"{len(clusters)} clusters (>= {self._min_cluster_size} cells), "
+            f"largest = {largest} cells")
+
+        self._publish_cluster_markers(clusters, self._map.info)
 
     # --- visualization ----------------------------------------------------
 
-    def _publish_frontier_markers(self, cols: np.ndarray, rows: np.ndarray,
-                                  info: MapMetaData) -> None:
-        """Show all frontier cells in RViz as one cloud of points."""
-        marker = Marker()
+    def _publish_cluster_markers(self, clusters: List[Cluster],
+                                 info: MapMetaData) -> None:
+        """Draw one colored dot per cluster at its centroid, labelled with size."""
+        markers = [self._delete_all_marker()]
+
+        for i, cluster in enumerate(clusters):
+            color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
+            mean_row, mean_col = cluster.mean(axis=0)
+            center = self._cell_center(mean_col, mean_row, info)
+
+            dot = Marker()
+            self._init_marker(dot, "centroids", Marker.SPHERE, i, 0.3)
+            dot.color.r, dot.color.g, dot.color.b = color
+            dot.pose.position = center
+            markers.append(dot)
+
+            label = Marker()
+            self._init_marker(label, "labels", Marker.TEXT_VIEW_FACING, i, 0.25)
+            label.color.r = label.color.g = label.color.b = 1.0
+            label.pose.position = Point(x=center.x, y=center.y, z=0.4)
+            label.text = str(len(cluster))
+            markers.append(label)
+
+        self._cluster_pub.publish(MarkerArray(markers=markers))
+
+    def _init_marker(self, marker: Marker, ns: str, kind: int, mid: int,
+                     scale: float) -> None:
         marker.header.frame_id = self._map_frame
         marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = "frontier_cells"
-        marker.id = 0
-        marker.type = Marker.POINTS
+        marker.ns = ns
+        marker.id = mid
+        marker.type = kind
         marker.action = Marker.ADD
-        marker.scale.x = info.resolution
-        marker.scale.y = info.resolution
-        marker.color.r = 1.0   # magenta, stands out against the grey map
-        marker.color.b = 1.0
+        marker.scale.x = marker.scale.y = marker.scale.z = scale
         marker.color.a = 1.0
-        marker.points = [
-            self._cell_center(int(gx), int(gy), info) for gx, gy in zip(cols, rows)]
 
-        self._frontier_pub.publish(MarkerArray(markers=[marker]))
+    def _delete_all_marker(self) -> Marker:
+        """Clears last cycle's markers so stale clusters don't linger in RViz."""
+        marker = Marker()
+        marker.header.frame_id = self._map_frame
+        marker.action = Marker.DELETEALL
+        return marker
 
     @staticmethod
-    def _cell_center(gx: int, gy: int, info: MapMetaData) -> Point:
+    def _cell_center(gx: float, gy: float, info: MapMetaData) -> Point:
         """Center of grid cell (gx, gy) in map-frame world coordinates."""
         return Point(
             x=info.origin.position.x + (gx + 0.5) * info.resolution,
