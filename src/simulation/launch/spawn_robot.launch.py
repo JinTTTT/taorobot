@@ -12,13 +12,10 @@ def generate_launch_description():
     pkg_path = get_package_share_directory('simulation')
     urdf_file = os.path.join(pkg_path, 'urdf', 'my_robot.urdf')
 
-    # `models/objs` holds downloaded Fuel objects (chairs, tables, ...);
-    # it must be on the path so `model://<name>` resolves by directory name.
     models_path = os.path.join(pkg_path, 'models')
-    objs_path = os.path.join(models_path, 'objs')
     gazebo_model_path_env = SetEnvironmentVariable(
         'GZ_SIM_RESOURCE_PATH',
-        f'{models_path}:{objs_path}'
+        models_path
     )
 
     # 2. CONFIG: Read the URDF file specifically
@@ -29,8 +26,7 @@ def generate_launch_description():
     # 3. ACTION: Start the Gazebo Simulator
     # We use the standard "ros_gz_sim" launch file.
     # '-r' means "run immediately" (don't start paused).
-    # world_file = os.path.join(pkg_path, 'worlds', 'my_world.sdf')
-    world_file = os.path.join(pkg_path, 'worlds', 'office_world.sdf')
+    world_file = os.path.join(pkg_path, 'worlds', 'my_world.sdf')
     start_gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
@@ -46,8 +42,8 @@ def generate_launch_description():
         arguments=[
             '-topic', 'robot_description', # The topic where the URDF is published
             '-name', 'my_first_robot',     # The name it will have in Gazebo
-            '-x', '0.0',                   # world origin = spawn spot (office
-            '-y', '0.0',                   # world is shifted to match)
+            '-x', '0.0',
+            '-y', '0.0',
             '-z', '0.5'                    # Spawn it 0.5 meters high (so it drops)
         ],
         output='screen'
