@@ -1,0 +1,7 @@
+/**:
+  ros__parameters:
+    map_topic: /map          # live occupancy grid to explore
+    goal_topic: /goal_pose   # next exploration goal (PoseStamped, map frame)
+    map_frame: map
+    robot_frame: base_link
+    planning_period_s: 2.0   # how often to re-pick a frontier goal
