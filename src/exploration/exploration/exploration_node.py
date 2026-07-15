@@ -1,25 +1,18 @@
 """Exploration node: nearest-frontier goal selection.
 
-Drives the robot to build an occupancy map on its own, replacing the human who
-otherwise clicks "2D Goal Pose" in RViz. Each cycle it reads the live map,
-finds the edges between known-free and unknown space (frontiers), and sends the
-robot to the nearest one; when no frontier is left, the map is complete.
+Maps an area on its own, replacing the human clicking "2D Goal Pose". Each
+cycle it reads the live map, finds the frontier (the edge between free and
+unknown space), and sends the robot to the nearest one. When no frontier is
+left, the map is complete.
 
-The loop:
-  step 1  find frontier cells        free cells touching unknown space
-  step 2  group cells into clusters  flood fill, one cluster per opening
-  step 3  pick the nearest cluster   snap to a real cell, rank by distance
-  step 4  publish it as a goal pose  facing into the unknown
+  step 1  frontier cells   free cells that touch unknown space
+  step 2  clusters         flood-fill touching frontier cells into groups
+  step 3  nearest          snap each cluster to a real cell, pick the closest
+  step 4  goal pose        publish it on /goal_pose, facing the unknown
 
-A frontier cell is a *free* cell that touches at least one *unknown* cell --
-the edge of the mapped area, i.e. "a doorway into the dark".
-
-Subscribes:
-  /map                    nav_msgs/OccupancyGrid   the growing map
-
-Publishes:
-  /goal_pose              geometry_msgs/PoseStamped        next frontier goal
-  /exploration/clusters   visualization_msgs/MarkerArray   colored clusters (RViz)
+Subscribes:  /map                    nav_msgs/OccupancyGrid
+Publishes:   /goal_pose              geometry_msgs/PoseStamped
+             /exploration/clusters   visualization_msgs/MarkerArray  (RViz)
 """
 import math
 from collections import deque
@@ -38,19 +31,11 @@ from visualization_msgs.msg import Marker, MarkerArray
 Pose2D = Tuple[float, float, float]   # (x, y, yaw) in the map frame
 Cluster = np.ndarray                  # (K, 2) array of (row, col) cell indices
 
-UNKNOWN = -1   # OccupancyGrid value for a never-observed cell
+UNKNOWN = -1   # OccupancyGrid value for an unobserved cell
 
-# 8-connectivity: a cell's neighbours include diagonals, so a frontier strip
-# stays in one piece instead of splitting apart.
+# 8-connectivity (diagonals included) keeps a frontier strip in one piece.
 NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1),
               (0, 1), (1, -1), (1, 0), (1, 1)]
-
-# Distinct colors cycled per cluster so each opening is a different blob in RViz.
-CLUSTER_COLORS = [
-    (0.90, 0.10, 0.10), (0.10, 0.60, 0.90), (0.20, 0.80, 0.20),
-    (0.95, 0.75, 0.05), (0.60, 0.20, 0.80), (0.95, 0.45, 0.10),
-    (0.10, 0.80, 0.75), (0.95, 0.35, 0.65),
-]
 
 
 class ExplorationNode(Node):
@@ -62,37 +47,30 @@ class ExplorationNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("robot_frame", "base_link")
         self.declare_parameter("planning_period_s", 2.0)
-        # A cell counts as free (drivable) when its occupancy is in [0, threshold].
-        # Mapped-free cells settle low; walls settle high; unknown is -1.
-        self.declare_parameter("free_threshold", 45)
-        # Frontier clusters smaller than this many cells are ignored as noise.
-        self.declare_parameter("min_cluster_size", 5)
+        self.declare_parameter("free_threshold", 45)     # occupancy 0..this = free
+        self.declare_parameter("min_cluster_size", 5)    # smaller clusters are noise
 
         self._map_frame = self.get_parameter("map_frame").value
         self._robot_frame = self.get_parameter("robot_frame").value
         self._free_threshold = self.get_parameter("free_threshold").value
         self._min_cluster_size = self.get_parameter("min_cluster_size").value
 
-        # The map is latched (transient local), so match it or we miss the map
-        # that was published before this node started.
+        # The map latches (transient local); match it or we miss the last map.
         map_qos = QoSProfile(depth=1)
         map_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
         self._map: Optional[OccupancyGrid] = None
         self.create_subscription(
-            OccupancyGrid, self.get_parameter("map_topic").value,
-            self._on_map, map_qos)
+            OccupancyGrid, self.get_parameter("map_topic").value, self._on_map, map_qos)
 
         self._goal_pub = self.create_publisher(
             PoseStamped, self.get_parameter("goal_topic").value, 1)
-        self._cluster_pub = self.create_publisher(
-            MarkerArray, "/exploration/clusters", 1)
+        self._marker_pub = self.create_publisher(MarkerArray, "/exploration/clusters", 1)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
-        period = self.get_parameter("planning_period_s").value
-        self.create_timer(period, self._explore_once)
-
+        self.create_timer(
+            self.get_parameter("planning_period_s").value, self._explore_once)
         self.get_logger().info("exploration_node started")
 
     # --- inputs -----------------------------------------------------------
@@ -101,60 +79,45 @@ class ExplorationNode(Node):
         self._map = msg
 
     def _robot_pose(self) -> Optional[Pose2D]:
-        """Current robot pose in the map frame from TF, or None if unavailable."""
+        """Robot (x, y, yaw) in the map frame from TF, or None if unavailable."""
         try:
             tf = self._tf_buffer.lookup_transform(
                 self._map_frame, self._robot_frame, rclpy.time.Time())
         except (LookupException, ConnectivityException, ExtrapolationException):
             return None
-        t = tf.transform.translation
-        q = tf.transform.rotation
-        yaw = 2.0 * math.atan2(q.z, q.w)
-        return (t.x, t.y, yaw)
+        t, q = tf.transform.translation, tf.transform.rotation
+        return (t.x, t.y, 2.0 * math.atan2(q.z, q.w))
 
     # --- step 1: frontier cells ------------------------------------------
 
     def _frontier_mask(self, grid: np.ndarray) -> np.ndarray:
-        """Boolean map, True where a cell is free AND touches unknown space.
+        """True where a free cell touches unknown space (grid rows = y, cols = x).
 
-        `grid` is the occupancy grid as a 2D array (row = y, col = x).
-        We build it with array math instead of a per-cell loop: a cell has an
-        unknown neighbour if any of its 8 shifted copies of the unknown mask is
-        True at that cell.
+        A cell borders unknown if any of the 8 shifted copies of the unknown
+        mask is set there -- computed with array math, no per-cell loop.
         """
         free = (grid >= 0) & (grid <= self._free_threshold)
         unknown = grid == UNKNOWN
-
-        # Pad the unknown mask with a False border so shifting never wraps
-        # around the map edge, then OR together the 8 neighbour directions.
-        padded = np.pad(unknown, 1, constant_values=False)
+        padded = np.pad(unknown, 1, constant_values=False)  # False border, no wrap
         h, w = grid.shape
-        neighbour_unknown = (
-            padded[0:h,     0:w]     | padded[0:h,     1:w + 1] | padded[0:h,     2:w + 2] |
-            padded[1:h + 1, 0:w]     |                            padded[1:h + 1, 2:w + 2] |
-            padded[2:h + 2, 0:w]     | padded[2:h + 2, 1:w + 1] | padded[2:h + 2, 2:w + 2])
-
-        return free & neighbour_unknown
+        borders_unknown = (
+            padded[0:h,     0:w] | padded[0:h,     1:w + 1] | padded[0:h,     2:w + 2] |
+            padded[1:h + 1, 0:w] |                            padded[1:h + 1, 2:w + 2] |
+            padded[2:h + 2, 0:w] | padded[2:h + 2, 1:w + 1] | padded[2:h + 2, 2:w + 2])
+        return free & borders_unknown
 
     # --- step 2: cluster the cells ---------------------------------------
 
-    def _cluster_frontiers(self, mask: np.ndarray) -> List[Cluster]:
-        """Group touching frontier cells into clusters via flood fill.
-
-        Each unvisited frontier cell seeds a new cluster; a breadth-first flood
-        pulls in every connected frontier neighbour until the blob is complete.
-        Clusters smaller than `min_cluster_size` are dropped as noise.
-        """
+    def _find_clusters(self, mask: np.ndarray) -> List[Cluster]:
+        """Flood-fill touching frontier cells into clusters (>= min size)."""
         h, w = mask.shape
         visited = np.zeros_like(mask, dtype=bool)
         clusters: List[Cluster] = []
 
-        rows, cols = np.where(mask)
-        for r0, c0 in zip(rows, cols):
+        for r0, c0 in zip(*np.where(mask)):
             if visited[r0, c0]:
                 continue
-            cells = []
-            queue = deque([(r0, c0)])
+            cells, queue = [], deque([(r0, c0)])
             visited[r0, c0] = True
             while queue:
                 r, c = queue.popleft()
@@ -166,31 +129,16 @@ class ExplorationNode(Node):
                         queue.append((nr, nc))
             if len(cells) >= self._min_cluster_size:
                 clusters.append(np.array(cells))
-
         return clusters
 
-    # --- step 3: pick the nearest cluster --------------------------------
+    # --- step 3: nearest cluster -----------------------------------------
 
-    def _cluster_goal(self, cluster: Cluster, info: MapMetaData) -> Point:
-        """The cluster's goal point: its centroid snapped to the nearest real
-        frontier cell, so the goal is always a valid (free) cell rather than an
-        averaged point that could fall on a wall for a curved cluster.
-        """
-        mean = cluster.mean(axis=0)                       # (mean_row, mean_col)
-        nearest = cluster[((cluster - mean) ** 2).sum(axis=1).argmin()]
-        row, col = int(nearest[0]), int(nearest[1])
-        return self._cell_center(col, row, info)
-
-    def _select_nearest(self, clusters: List[Cluster], robot_xy: Tuple[float, float],
-                        info: MapMetaData) -> Tuple[int, Point, float]:
-        """Index, goal point, and straight-line distance of the closest cluster."""
-        best_index, best_goal, best_dist = 0, None, float("inf")
-        for i, cluster in enumerate(clusters):
-            goal = self._cluster_goal(cluster, info)
-            dist = math.hypot(goal.x - robot_xy[0], goal.y - robot_xy[1])
-            if dist < best_dist:
-                best_index, best_goal, best_dist = i, goal, dist
-        return best_index, best_goal, best_dist
+    def _goal_point(self, cluster: Cluster, info: MapMetaData) -> Point:
+        """Cluster centroid snapped to its nearest cell, so the goal is a real
+        (free) cell rather than an average that could fall on a wall."""
+        mean = cluster.mean(axis=0)
+        row, col = cluster[((cluster - mean) ** 2).sum(axis=1).argmin()]
+        return self._cell_center(int(col), int(row), info)
 
     # --- main loop --------------------------------------------------------
 
@@ -205,32 +153,32 @@ class ExplorationNode(Node):
                 throttle_duration_sec=5.0)
             return
 
-        grid = np.array(self._map.data, dtype=np.int8).reshape(
-            self._map.info.height, self._map.info.width)
         info = self._map.info
-
-        clusters = self._cluster_frontiers(self._frontier_mask(grid))
+        grid = np.array(self._map.data, dtype=np.int8).reshape(info.height, info.width)
+        clusters = self._find_clusters(self._frontier_mask(grid))
         if not clusters:
             self.get_logger().info("no frontiers left - map complete")
-            self._cluster_pub.publish(MarkerArray(markers=[self._delete_all_marker()]))
+            self._marker_pub.publish(MarkerArray(markers=[self._delete_all_marker()]))
             return
 
-        robot_xy = (pose[0], pose[1])
-        chosen, goal, dist = self._select_nearest(clusters, robot_xy, info)
+        robot = (pose[0], pose[1])
+        goals = [self._goal_point(c, info) for c in clusters]
+        chosen = min(range(len(goals)), key=lambda i: self._distance(goals[i], robot))
+        goal = goals[chosen]
+
         self.get_logger().info(
-            f"{len(clusters)} clusters | nearest = #{chosen} "
+            f"{len(clusters)} clusters | nearest #{chosen} "
             f"({len(clusters[chosen])} cells) at ({goal.x:.2f}, {goal.y:.2f}), "
-            f"{dist:.2f} m away")
+            f"{self._distance(goal, robot):.2f} m")
 
-        self._publish_goal(goal, robot_xy)
-        self._publish_cluster_markers(clusters, info, chosen, goal, robot_xy)
+        self._publish_goal(goal, robot)
+        self._publish_markers(clusters, goals, chosen, robot)
 
-    # --- step 4: publish the goal pose ------------------------------------
+    # --- step 4: publish the goal pose -----------------------------------
 
-    def _publish_goal(self, goal: Point, robot_xy: Tuple[float, float]) -> None:
-        """Send the chosen frontier as a PoseStamped, facing into the unknown
-        (yaw points from the robot toward the goal, i.e. the travel direction)."""
-        yaw = math.atan2(goal.y - robot_xy[1], goal.x - robot_xy[0])
+    def _publish_goal(self, goal: Point, robot: Tuple[float, float]) -> None:
+        """Publish the goal facing from the robot into the unknown."""
+        yaw = math.atan2(goal.y - robot[1], goal.x - robot[0])
         msg = PoseStamped()
         msg.header.frame_id = self._map_frame
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -241,65 +189,53 @@ class ExplorationNode(Node):
 
     # --- visualization ----------------------------------------------------
 
-    def _publish_cluster_markers(self, clusters: List[Cluster], info: MapMetaData,
-                                 chosen: int, goal: Point,
-                                 robot_xy: Tuple[float, float]) -> None:
-        """Draw one colored dot per cluster (labelled with size), plus a green
-        goal marker on the chosen cluster and a line from the robot to it."""
+    def _publish_markers(self, clusters: List[Cluster], goals: List[Point],
+                         chosen: int, robot: Tuple[float, float]) -> None:
+        """One labelled dot per cluster ("#i (N cells)"); the chosen goal is
+        enlarged and joined to the robot by a line."""
         markers = [self._delete_all_marker()]
+        for i, (cluster, goal) in enumerate(zip(clusters, goals)):
+            is_goal = i == chosen
 
-        for i, cluster in enumerate(clusters):
-            color = CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
-            center = self._cluster_goal(cluster, info)
-
-            dot = Marker()
-            self._init_marker(dot, "centroids", Marker.SPHERE, i, 0.3)
-            dot.color.r, dot.color.g, dot.color.b = color
-            dot.pose.position = center
+            dot = self._make_marker("dots", i, Marker.SPHERE, 0.5 if is_goal else 0.25)
+            dot.pose.position = goal
             markers.append(dot)
 
-            label = Marker()
-            self._init_marker(label, "labels", Marker.TEXT_VIEW_FACING, i, 0.25)
-            label.color.r = label.color.g = label.color.b = 1.0
-            label.pose.position = Point(x=center.x, y=center.y, z=0.4)
-            label.text = str(len(cluster))
+            label = self._make_marker("labels", i, Marker.TEXT_VIEW_FACING, 0.25)
+            label.pose.position = Point(x=goal.x, y=goal.y, z=0.4)
+            label.text = f"#{i} ({len(cluster)} cells)" + (" GOAL" if is_goal else "")
             markers.append(label)
 
-        # Highlight the chosen goal and draw the robot -> goal line.
-        goal_dot = Marker()
-        self._init_marker(goal_dot, "goal", Marker.SPHERE, 0, 0.5)
-        goal_dot.color.g = 1.0   # bright green
-        goal_dot.pose.position = goal
-        markers.append(goal_dot)
-
-        line = Marker()
-        self._init_marker(line, "goal_line", Marker.LINE_STRIP, 0, 0.05)
-        line.color.g = 1.0
-        line.points = [Point(x=robot_xy[0], y=robot_xy[1], z=0.0), goal]
+        line = self._make_marker("goal_line", 0, Marker.LINE_STRIP, 0.05)
+        line.points = [Point(x=robot[0], y=robot[1], z=0.0), goals[chosen]]
         markers.append(line)
 
-        self._cluster_pub.publish(MarkerArray(markers=markers))
+        self._marker_pub.publish(MarkerArray(markers=markers))
 
-    def _init_marker(self, marker: Marker, ns: str, kind: int, mid: int,
-                     scale: float) -> None:
+    def _make_marker(self, ns: str, mid: int, kind: int, scale: float) -> Marker:
+        marker = Marker()
         marker.header.frame_id = self._map_frame
         marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = ns
-        marker.id = mid
-        marker.type = kind
-        marker.action = Marker.ADD
+        marker.ns, marker.id, marker.type, marker.action = ns, mid, kind, Marker.ADD
         marker.scale.x = marker.scale.y = marker.scale.z = scale
-        marker.color.a = 1.0
+        marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0
+        return marker
 
     def _delete_all_marker(self) -> Marker:
-        """Clears last cycle's markers so stale clusters don't linger in RViz."""
+        """Clears last cycle's markers so stale ones don't linger in RViz."""
         marker = Marker()
         marker.header.frame_id = self._map_frame
         marker.action = Marker.DELETEALL
         return marker
 
+    # --- helpers ----------------------------------------------------------
+
     @staticmethod
-    def _cell_center(gx: float, gy: float, info: MapMetaData) -> Point:
+    def _distance(point: Point, xy: Tuple[float, float]) -> float:
+        return math.hypot(point.x - xy[0], point.y - xy[1])
+
+    @staticmethod
+    def _cell_center(gx: int, gy: int, info: MapMetaData) -> Point:
         """Center of grid cell (gx, gy) in map-frame world coordinates."""
         return Point(
             x=info.origin.position.x + (gx + 0.5) * info.resolution,
