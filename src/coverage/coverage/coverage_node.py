@@ -21,6 +21,7 @@ lands next.
 Subscribes:  /map                     nav_msgs/OccupancyGrid
              /oakd/rgb/camera_info    sensor_msgs/CameraInfo   (camera FOV)
 Publishes:   /goal_pose               geometry_msgs/PoseStamped
+             /coverage/seen           nav_msgs/OccupancyGrid  (seen grid, RViz)
              /coverage/markers        visualization_msgs/MarkerArray  (RViz)
 """
 import math
@@ -83,8 +84,15 @@ class CoverageNode(Node):
             CameraInfo, self.get_parameter("camera_info_topic").value,
             self._on_camera_info, qos_profile_sensor_data)
 
+        # Persistent record of which cells the camera has seen. Kept aligned to
+        # the live map (which grows), so a cell seen once stays seen (see
+        # _ensure_seen_aligned). Same shape as the map it was last aligned to.
+        self._seen: Optional[np.ndarray] = None          # bool grid, True = seen
+        self._seen_info = None                           # map info self._seen matches
+
         self._goal_pub = self.create_publisher(
             PoseStamped, self.get_parameter("goal_topic").value, 1)
+        self._seen_pub = self.create_publisher(OccupancyGrid, "/coverage/seen", map_qos)
         self._marker_pub = self.create_publisher(MarkerArray, "/coverage/markers", 1)
 
         self._tf_buffer = Buffer()
@@ -154,13 +162,80 @@ class CoverageNode(Node):
                 throttle_duration_sec=5.0)
             return
 
-        # TODO(coverage): all inputs are live here (map, camera FOV, camera pose).
-        #   step 1  update the seen grid from the camera cone at `camera`
-        #   step 2  target cells = free & not-seen & clear of walls
+        # step 1: mark the cells the camera is looking at right now as seen.
+        info = self._map.info
+        self._ensure_seen_aligned(info)
+        self._mark_seen(camera, info)
+        self._publish_seen(info)
+
+        # TODO(coverage): the seen grid is now live. Next:
+        #   step 2  target cells = free (from grid) & not-seen & clear of walls
         #   step 3-5  cluster, pick nearest, publish goal (mirrors exploration)
-        self.get_logger().info(
-            "coverage inputs ready (map + camera) - logic lands next",
-            throttle_duration_sec=5.0)
+
+    # --- step 1: the seen grid -------------------------------------------
+
+    def _ensure_seen_aligned(self, info) -> None:
+        """Keep the persistent seen grid the same shape/origin as the live map.
+
+        The map grows and its origin shifts as new area is discovered. Resolution
+        is fixed, so realigning is a pure integer cell shift: allocate a fresh
+        grid matching the current map and copy the old seen flags into it at the
+        offset between the two origins. Cells seen before stay seen.
+        """
+        if self._same_grid(self._seen_info, info):
+            return
+        new = np.zeros((info.height, info.width), dtype=bool)
+        if self._seen is not None:
+            old = self._seen_info
+            col_off = round((old.origin.position.x - info.origin.position.x) / info.resolution)
+            row_off = round((old.origin.position.y - info.origin.position.y) / info.resolution)
+            oh, ow = self._seen.shape
+            dr0, dr1 = max(0, row_off), min(info.height, row_off + oh)
+            dc0, dc1 = max(0, col_off), min(info.width, col_off + ow)
+            if dr1 > dr0 and dc1 > dc0:
+                new[dr0:dr1, dc0:dc1] = self._seen[
+                    dr0 - row_off:dr1 - row_off, dc0 - col_off:dc1 - col_off]
+        self._seen = new
+        self._seen_info = info
+
+    def _mark_seen(self, camera: Pose2D, info) -> None:
+        """Flip every cell inside the camera's field-of-view cone to seen.
+
+        A cell is in view if it is within `camera_range_m` of the camera and its
+        bearing is within half the horizontal FOV of where the camera looks.
+        No occlusion yet: a wall between the camera and the cell does not block
+        the view (marks a bit too eagerly; a raytraced version is a drop-in later).
+        """
+        cx, cy, cyaw = camera
+        res = info.resolution
+        cols = np.arange(info.width).reshape(1, -1)
+        rows = np.arange(info.height).reshape(-1, 1)
+        dx = (info.origin.position.x + (cols + 0.5) * res) - cx   # (1, w)
+        dy = (info.origin.position.y + (rows + 0.5) * res) - cy   # (h, 1)
+        dist2 = dx * dx + dy * dy                                 # (h, w)
+        bearing = np.arctan2(dy, dx)                             # (h, w)
+        # Smallest signed angle between the cell bearing and the camera heading.
+        offset = np.abs(np.arctan2(np.sin(bearing - cyaw), np.cos(bearing - cyaw)))
+        in_view = (dist2 <= self._camera_range_m ** 2) & (offset <= self._hfov / 2.0)
+        self._seen |= in_view
+
+    def _publish_seen(self, info) -> None:
+        """Publish the seen grid as an OccupancyGrid (100 = seen) for RViz."""
+        msg = OccupancyGrid()
+        msg.header.frame_id = self._map_frame
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.info = info
+        msg.data = np.where(self._seen, 100, 0).astype(np.int8).flatten().tolist()
+        self._seen_pub.publish(msg)
+
+    @staticmethod
+    def _same_grid(a, b) -> bool:
+        """True if two map infos have the same size, origin, and resolution."""
+        return (a is not None and
+                a.width == b.width and a.height == b.height and
+                a.resolution == b.resolution and
+                a.origin.position.x == b.origin.position.x and
+                a.origin.position.y == b.origin.position.y)
 
 
 def main(args=None) -> None:

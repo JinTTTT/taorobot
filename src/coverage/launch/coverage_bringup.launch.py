@@ -1,27 +1,27 @@
-"""Coverage bringup: live mapping + semantic mapping + planner + controller + goal selection.
+"""Coverage bringup: occupancy mapping + planner + controller + goal selection.
 
-Runs on top of the simulation (start that separately):
+Runs on top of the *semantic* simulation (start that separately):
 
-    ros2 launch simulation bringup_simulation.launch.py
+    ros2 launch simulation semantic_bringup_simulation.launch.py
     ros2 launch coverage coverage_bringup.launch.py
 
-Same base stack as exploration_bringup, with two differences: the semantic
-mapping pipeline runs (so the camera builds the object map), and the goal
-picker is `coverage` instead of `exploration` -- it drives the robot to where
-the camera has not looked yet, building the occupancy map and the semantic map
-in one pass.
+Coverage needs the camera, so it layers on semantic_bringup_simulation (office
+world with objects, OAK-D camera bridge, ground-truth localizer, and the
+semantic_mapping perception + map nodes) -- NOT the plain bringup_simulation,
+which has no camera. That sim already provides map -> odom and semantic mapping,
+so this launch only adds the pieces it is missing:
 
-Everything runs on the sim's ground-truth pose, so the whole stack is
-consistent and a stray bump can't smear the map:
-  - ground_truth_map_to_odom  exact map -> odom (the sim's "perfect localizer")
-  - mapping                   builds the live /map, using ground-truth pose
-  - semantic_mapping          camera -> persistent object map
-  - motion_planning           plans a path to /goal_pose
-  - path_follow_control       drives the path with pure pursuit -> /cmd_vel
-  - coverage                  picks nearest-unseen goals and publishes /goal_pose
+  - mapping             builds the live /map from ground-truth pose
+  - motion_planning     plans a path to /goal_pose
+  - path_follow_control drives the path with pure pursuit -> /cmd_vel
+  - coverage            picks nearest-unseen goals and publishes /goal_pose
+
+The goal picker is `coverage` instead of `exploration`: it drives the robot to
+where the camera has not looked yet, building the occupancy map and (via the
+sim's semantic_mapping nodes) the semantic map in one pass.
 
 The planner and controller take their start pose on /estimated_pose, remapped
-to the ground-truth pose since no localization is running.
+to the sim's ground-truth pose since no localization is running.
 
 Full loop: /goal_pose -> /smoothed_planned_path -> /cmd_vel -> robot moves.
 """
@@ -29,8 +29,6 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 
@@ -44,17 +42,9 @@ def generate_launch_description():
     coverage_config = os.path.join(
         get_package_share_directory("coverage"), "config", "coverage.yaml")
 
-    # Sim-only perfect localizer: exact map -> odom from ground truth, so the
-    # `map` frame is drift-free. Replaces mapping.launch's static-identity one.
-    ground_truth_map_to_odom = Node(
-        package="simulation",
-        executable="ground_truth_map_to_odom",
-        name="ground_truth_map_to_odom",
-        output="screen",
-    )
-
     # Build the map from ground-truth pose (override the config's odom default),
-    # so a collision can't corrupt the map through drifting wheel odometry.
+    # so a collision can't corrupt the map through drifting wheel odometry. The
+    # semantic sim already publishes map -> odom, so we don't start that here.
     mapping = Node(
         package="mapping",
         executable="occupancy_mapper_node",
@@ -62,12 +52,6 @@ def generate_launch_description():
         output="screen",
         parameters=[mapping_config, {"use_ground_truth_pose": True}],
     )
-
-    # Camera -> persistent semantic object map (perception + semantic_map nodes).
-    semantic_mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory("semantic_mapping"),
-            "launch", "semantic_mapping.launch.py")))
 
     # Planner and controller take their start pose on /estimated_pose; with no
     # localization running, feed in the sim's ground-truth pose.
@@ -100,9 +84,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        ground_truth_map_to_odom,
         mapping,
-        semantic_mapping,
         motion_planning,
         path_follow_control,
         coverage,
