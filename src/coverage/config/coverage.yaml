@@ -1,0 +1,33 @@
+/**:
+  ros__parameters:
+    map_topic: /map                       # live occupancy grid
+    camera_info_topic: /oakd/rgb/camera_info  # camera intrinsics -> field of view
+    goal_topic: /goal_pose                # next coverage goal (PoseStamped, map frame)
+    map_frame: map
+    robot_frame: base_link
+
+    # --- OAK-D-Pro camera geometry (from simulation/urdf/my_robot.urdf) --------
+    # Use the *body* camera frame (+x forward), not the optical frame (z forward,
+    # REP-145) that camera_info is stamped with: the seen-grid cone works in the
+    # map plane and needs +x = where the camera looks. The camera is mounted
+    # 0.31 m forward / 0.05 m up on base_link, level and looking straight ahead,
+    # so its ground-plane cone is a simple forward fan (TF gives its exact pose).
+    camera_frame: oakd_rgb_camera_frame
+    # Horizontal FOV is derived from camera_info (fx + image width); for this
+    # camera that comes out to ~69 deg (1.2043 rad, 640x480). Vertical FOV is
+    # ignored -- the seen grid is a 2D top-down fan, as in SeGuE's view mask.
+    camera_range_m: 4.0      # max range a cell counts as "seen well enough" for
+                             # recognition. The sim renders sharp to the 15 m far
+                             # clip, but semantic quality needs a closer look, so
+                             # we cap short. This is the main coverage-quality knob:
+                             # smaller = the robot gets closer to everything
+                             # (thorough, slower); larger = faster, coarser views.
+
+    planning_period_s: 1.0   # control-loop tick: check arrival/timeout, re-pick when idle
+    free_threshold: 45       # occupancy 0..this = drivable free cell (unknown is -1)
+    min_cluster_size: 5      # drop unseen clusters smaller than this many cells
+    obstacle_clearance_m: 0.35  # target cells must be at least this far from walls, so
+                                # goals stay reachable. Match motion_planning's
+                                # robot_radius_m (0.35) -- the planner rejects goals inside it.
+    arrival_tolerance: 0.6   # within this distance of the goal counts as reached
+    goal_timeout_s: 30.0     # give up on a goal (re-pick) after this many seconds
