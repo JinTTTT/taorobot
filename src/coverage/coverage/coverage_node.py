@@ -8,7 +8,7 @@ know yet. Chasing camera views also grows the occupancy map for free (the lidar
 sees far more than the camera as the robot drives), so this one node builds both
 the occupancy map and the semantic map in a single pass.
 
-  step 1  seen grid    mark free cells inside the camera's field-of-view cone
+  step 1  seen grid    mark free cells the camera sees (FOV cone, line-of-sight)
   step 2  targets       free cells not yet seen by the camera, clear of walls
   step 3  clusters      flood-fill touching target cells into groups
   step 4  nearest       pick the closest cluster, snap it to a real cell
@@ -162,10 +162,11 @@ class CoverageNode(Node):
                 throttle_duration_sec=5.0)
             return
 
-        # step 1: mark the cells the camera is looking at right now as seen.
+        # step 1: mark the free cells the camera can see right now as seen.
         info = self._map.info
+        grid = np.array(self._map.data, dtype=np.int8).reshape(info.height, info.width)
         self._ensure_seen_aligned(info)
-        self._mark_seen(camera, info)
+        self._mark_seen(camera, grid, info)
         self._publish_seen(info)
 
         # TODO(coverage): the seen grid is now live. Next:
@@ -198,26 +199,63 @@ class CoverageNode(Node):
         self._seen = new
         self._seen_info = info
 
-    def _mark_seen(self, camera: Pose2D, info) -> None:
-        """Flip every cell inside the camera's field-of-view cone to seen.
+    def _mark_seen(self, camera: Pose2D, grid: np.ndarray, info) -> None:
+        """Flip the free cells the camera can actually see right now to seen.
 
-        A cell is in view if it is within `camera_range_m` of the camera and its
-        bearing is within half the horizontal FOV of where the camera looks.
-        No occlusion yet: a wall between the camera and the cell does not block
-        the view (marks a bit too eagerly; a raytraced version is a drop-in later).
+        Cast a fan of rays across the horizontal FOV, out to `camera_range_m`,
+        exactly as the mapping node ray-traces lidar beams (Bresenham). Each ray
+        marks the free cells it crosses and stops at the first wall or unknown
+        cell -- so a cell behind a wall is never marked seen (line-of-sight).
+        Rays are spaced under a cell apart at max range, so the fan has no gaps.
         """
         cx, cy, cyaw = camera
         res = info.resolution
-        cols = np.arange(info.width).reshape(1, -1)
-        rows = np.arange(info.height).reshape(-1, 1)
-        dx = (info.origin.position.x + (cols + 0.5) * res) - cx   # (1, w)
-        dy = (info.origin.position.y + (rows + 0.5) * res) - cy   # (h, 1)
-        dist2 = dx * dx + dy * dy                                 # (h, w)
-        bearing = np.arctan2(dy, dx)                             # (h, w)
-        # Smallest signed angle between the cell bearing and the camera heading.
-        offset = np.abs(np.arctan2(np.sin(bearing - cyaw), np.cos(bearing - cyaw)))
-        in_view = (dist2 <= self._camera_range_m ** 2) & (offset <= self._hfov / 2.0)
-        self._seen |= in_view
+        c0 = int((cx - info.origin.position.x) / res)   # camera cell (col, row)
+        r0 = int((cy - info.origin.position.y) / res)
+        half = self._hfov / 2.0
+        # Space rays ~half a cell apart at max range, so the fan has no holes.
+        n_rays = max(1, math.ceil(2.0 * self._hfov * self._camera_range_m / res))
+        for k in range(n_rays + 1):
+            angle = cyaw - half + self._hfov * k / n_rays
+            ex = cx + self._camera_range_m * math.cos(angle)
+            ey = cy + self._camera_range_m * math.sin(angle)
+            c1 = int((ex - info.origin.position.x) / res)
+            r1 = int((ey - info.origin.position.y) / res)
+            self._cast_seen_ray(r0, c0, r1, c1, grid, info)
+
+    def _cast_seen_ray(self, r0: int, c0: int, r1: int, c1: int,
+                       grid: np.ndarray, info) -> None:
+        """Walk one Bresenham ray out from the camera cell, marking free cells
+        seen and stopping at the first wall or unknown cell (occlusion)."""
+        for col, row in self._bresenham(c0, r0, c1, r1):
+            if not (0 <= row < info.height and 0 <= col < info.width):
+                return
+            value = grid[row, col]
+            if value == UNKNOWN or value > self._free_threshold:
+                return  # wall or unmapped cell blocks the line of sight
+            self._seen[row, col] = True
+
+    @staticmethod
+    def _bresenham(x0: int, y0: int, x1: int, y1: int):
+        """Integer grid cells along the line (x0,y0)->(x1,y1), as in mapping."""
+        cells = []
+        dx, dy = abs(x1 - x0), abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        x, y = x0, y0
+        while True:
+            cells.append((x, y))
+            if x == x1 and y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+        return cells
 
     def _publish_seen(self, info) -> None:
         """Publish the seen grid as an OccupancyGrid (100 = seen) for RViz."""
