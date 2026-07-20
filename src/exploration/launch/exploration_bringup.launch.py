@@ -1,17 +1,21 @@
-"""Exploration bringup: live mapping + planner + frontier goal selection.
+"""Exploration bringup: live mapping + planner + controller + goal selection.
 
 Runs on top of the simulation (start that separately):
 
     ros2 launch simulation bringup_simulation.launch.py
     ros2 launch exploration exploration_bringup.launch.py
 
-Brings up:
-  - mapping              builds the live /map from /scan + pose
-  - motion_planning      plans a path to /goal_pose, using ground truth as the
-                         start pose (/estimated_pose remapped to /ground_truth_pose,
-                         since we have no localization running)
-  - path_follow_control  drives the path with pure pursuit, publishing /cmd_vel
-  - exploration          picks frontier goals and publishes them on /goal_pose
+Everything runs on the sim's ground-truth pose, so the whole stack is
+consistent and a stray bump can't smear the map:
+  - ground_truth_map_to_odom  exact map -> odom (the sim's "perfect localizer",
+                              replacing mapping's static-identity transform)
+  - mapping                   builds the live /map, using ground-truth pose
+  - motion_planning           plans a path to /goal_pose
+  - path_follow_control       drives the path with pure pursuit -> /cmd_vel
+  - exploration               picks frontier goals and publishes /goal_pose
+
+The planner and controller take their start pose on /estimated_pose, remapped
+to the ground-truth pose since no localization is running.
 
 Full loop: /goal_pose -> /smoothed_planned_path -> /cmd_vel -> robot moves.
 """
@@ -19,14 +23,12 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    mapping_launch = os.path.join(
-        get_package_share_directory("mapping"), "launch", "mapping.launch.py")
+    mapping_config = os.path.join(
+        get_package_share_directory("mapping"), "config", "mapping.yaml")
     planner_config = os.path.join(
         get_package_share_directory("motion_planning"), "config", "motion_planning.yaml")
     controller_config = os.path.join(
@@ -34,11 +36,27 @@ def generate_launch_description():
     exploration_config = os.path.join(
         get_package_share_directory("exploration"), "config", "exploration.yaml")
 
-    mapping = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(mapping_launch))
+    # Sim-only perfect localizer: exact map -> odom from ground truth, so the
+    # `map` frame is drift-free. Replaces mapping.launch's static-identity one.
+    ground_truth_map_to_odom = Node(
+        package="simulation",
+        executable="ground_truth_map_to_odom",
+        name="ground_truth_map_to_odom",
+        output="screen",
+    )
 
-    # Both the planner and controller need a start pose on /estimated_pose;
-    # with no localization running, feed in the sim's ground-truth pose.
+    # Build the map from ground-truth pose (override the config's odom default),
+    # so a collision can't corrupt the map through drifting wheel odometry.
+    mapping = Node(
+        package="mapping",
+        executable="occupancy_mapper_node",
+        name="mapping_node",
+        output="screen",
+        parameters=[mapping_config, {"use_ground_truth_pose": True}],
+    )
+
+    # Planner and controller take their start pose on /estimated_pose; with no
+    # localization running, feed in the sim's ground-truth pose.
     ground_truth_start = [("/estimated_pose", "/ground_truth_pose")]
 
     motion_planning = Node(
@@ -67,5 +85,10 @@ def generate_launch_description():
         parameters=[exploration_config],
     )
 
-    return LaunchDescription(
-        [mapping, motion_planning, path_follow_control, exploration])
+    return LaunchDescription([
+        ground_truth_map_to_odom,
+        mapping,
+        motion_planning,
+        path_follow_control,
+        exploration,
+    ])

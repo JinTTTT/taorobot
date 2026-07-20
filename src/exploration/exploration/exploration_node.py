@@ -159,6 +159,16 @@ class ExplorationNode(Node):
         row, col = cluster[((cluster - mean) ** 2).sum(axis=1).argmin()]
         return self._cell_center(int(col), int(row), info)
 
+    def _goal_blocked(self, goal: Point, grid: np.ndarray,
+                      clearance_cells: int, info: MapMetaData) -> bool:
+        """True if an obstacle now sits within clearance of the goal -- i.e. a
+        wall was discovered near it, so we should abort before driving into it."""
+        gx = int((goal.x - info.origin.position.x) / info.resolution)
+        gy = int((goal.y - info.origin.position.y) / info.resolution)
+        window = grid[max(0, gy - clearance_cells):gy + clearance_cells + 1,
+                      max(0, gx - clearance_cells):gx + clearance_cells + 1]
+        return bool((window > self._free_threshold).any())
+
     # --- main loop --------------------------------------------------------
 
     def _explore_once(self) -> None:
@@ -178,14 +188,18 @@ class ExplorationNode(Node):
         clearance_cells = max(1, round(self._obstacle_clearance_m / info.resolution))
         clusters = self._find_clusters(self._frontier_mask(grid, clearance_cells))
 
-        # Release the active goal once it is reached or has taken too long, so
-        # the next idle cycle can commit to a fresh frontier.
+        # Release the active goal once it is reached, taken too long, or a wall
+        # has appeared near it (an unmapped wall gets mapped as the robot nears
+        # it), so the next idle cycle can commit to a fresh frontier.
         if self._active_goal is not None:
             if self._distance(self._active_goal, robot) < self._arrival_tolerance:
                 self.get_logger().info("goal reached")
                 self._active_goal = None
             elif self._seconds_since(self._goal_time) > self._goal_timeout_s:
                 self.get_logger().warn("goal timed out - giving up, re-picking")
+                self._active_goal = None
+            elif self._goal_blocked(self._active_goal, grid, clearance_cells, info):
+                self.get_logger().warn("wall discovered near goal - aborting, re-picking")
                 self._active_goal = None
 
         if not clusters:

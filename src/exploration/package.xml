@@ -14,6 +14,7 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>tf2_geometry_msgs</exec_depend>
   <!-- pulled in by exploration_bringup.launch.py -->
+  <exec_depend>simulation</exec_depend>
   <exec_depend>mapping</exec_depend>
   <exec_depend>motion_planning</exec_depend>
   <exec_depend>path_follow_control</exec_depend>
