@@ -46,20 +46,25 @@ class ExplorationNode(Node):
         self.declare_parameter("goal_topic", "/goal_pose")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("robot_frame", "base_link")
-        self.declare_parameter("planning_period_s", 2.0)
+        self.declare_parameter("planning_period_s", 1.0)  # control-loop tick rate
         self.declare_parameter("free_threshold", 45)     # occupancy 0..this = free
         self.declare_parameter("min_cluster_size", 5)    # smaller clusters are noise
+        self.declare_parameter("arrival_tolerance", 0.3)  # within this of goal = reached
+        self.declare_parameter("goal_timeout_s", 30.0)    # give up on a goal after this
 
         self._map_frame = self.get_parameter("map_frame").value
         self._robot_frame = self.get_parameter("robot_frame").value
         self._free_threshold = self.get_parameter("free_threshold").value
         self._min_cluster_size = self.get_parameter("min_cluster_size").value
+        self._arrival_tolerance = self.get_parameter("arrival_tolerance").value
+        self._goal_timeout_s = self.get_parameter("goal_timeout_s").value
 
         # The map latches (transient local); match it or we miss the last map.
         map_qos = QoSProfile(depth=1)
         map_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
         self._map: Optional[OccupancyGrid] = None
-        self._last_goal: Optional[Point] = None   # only publish when the goal changes
+        self._active_goal: Optional[Point] = None   # frontier we are driving to now
+        self._goal_time = self.get_clock().now()    # when the active goal was chosen
         self.create_subscription(
             OccupancyGrid, self.get_parameter("map_topic").value, self._on_map, map_qos)
 
@@ -154,32 +159,41 @@ class ExplorationNode(Node):
                 throttle_duration_sec=5.0)
             return
 
+        robot = (pose[0], pose[1])
         info = self._map.info
         grid = np.array(self._map.data, dtype=np.int8).reshape(info.height, info.width)
         clusters = self._find_clusters(self._frontier_mask(grid))
+
+        # Release the active goal once it is reached or has taken too long, so
+        # the next idle cycle can commit to a fresh frontier.
+        if self._active_goal is not None:
+            if self._distance(self._active_goal, robot) < self._arrival_tolerance:
+                self.get_logger().info("goal reached")
+                self._active_goal = None
+            elif self._seconds_since(self._goal_time) > self._goal_timeout_s:
+                self.get_logger().warn("goal timed out - giving up, re-picking")
+                self._active_goal = None
+
         if not clusters:
             self.get_logger().info("no frontiers left - map complete")
+            self._active_goal = None
             self._marker_pub.publish(MarkerArray(markers=[self._delete_all_marker()]))
             return
 
-        robot = (pose[0], pose[1])
         goals = [self._goal_point(c, info) for c in clusters]
-        chosen = min(range(len(goals)), key=lambda i: self._distance(goals[i], robot))
-        goal = goals[chosen]
 
-        # self.get_logger().info(
-        #     f"{len(clusters)} clusters | nearest #{chosen} "
-        #     f"({len(clusters[chosen])} cells) at ({goal.x:.2f}, {goal.y:.2f}), "
-        #     f"{self._distance(goal, robot):.2f} m")
+        # Commit to the nearest frontier only while idle; never interrupt a goal.
+        if self._active_goal is None:
+            nearest = min(range(len(goals)), key=lambda i: self._distance(goals[i], robot))
+            self._active_goal = goals[nearest]
+            self._goal_time = self.get_clock().now()
+            self._publish_goal(self._active_goal, robot)
+            self.get_logger().info(
+                f"new goal: cluster of {len(clusters[nearest])} cells at "
+                f"({self._active_goal.x:.2f}, {self._active_goal.y:.2f}), "
+                f"{self._distance(self._active_goal, robot):.2f} m away")
 
-        # Only publish when the goal moves to a different cell, so the planner
-        # plans once per goal instead of replanning the same goal every cycle.
-        if self._last_goal is None or \
-                self._distance(goal, (self._last_goal.x, self._last_goal.y)) > info.resolution:
-            self._publish_goal(goal, robot)
-            self._last_goal = goal
-
-        self._publish_markers(clusters, goals, chosen, robot)
+        self._publish_markers(clusters, goals, self._active_goal, robot)
 
     # --- step 4: publish the goal pose -----------------------------------
 
@@ -197,25 +211,33 @@ class ExplorationNode(Node):
     # --- visualization ----------------------------------------------------
 
     def _publish_markers(self, clusters: List[Cluster], goals: List[Point],
-                         chosen: int, robot: Tuple[float, float]) -> None:
-        """One labelled dot per cluster ("#i (N cells)"); the chosen goal is
-        enlarged and joined to the robot by a line."""
+                         active_goal: Optional[Point], robot: Tuple[float, float]) -> None:
+        """A labelled dot per cluster ("#i (N cells)"), plus the active goal
+        enlarged, tagged "GOAL", and joined to the robot by a line."""
         markers = [self._delete_all_marker()]
         for i, (cluster, goal) in enumerate(zip(clusters, goals)):
-            is_goal = i == chosen
-
-            dot = self._make_marker("dots", i, Marker.SPHERE, 0.5 if is_goal else 0.25)
+            dot = self._make_marker("dots", i, Marker.SPHERE, 0.25)
             dot.pose.position = goal
             markers.append(dot)
 
             label = self._make_marker("labels", i, Marker.TEXT_VIEW_FACING, 0.25)
             label.pose.position = Point(x=goal.x, y=goal.y, z=0.4)
-            label.text = f"#{i} ({len(cluster)} cells)" + (" GOAL" if is_goal else "")
+            label.text = f"#{i} ({len(cluster)} cells)"
             markers.append(label)
 
-        line = self._make_marker("goal_line", 0, Marker.LINE_STRIP, 0.05)
-        line.points = [Point(x=robot[0], y=robot[1], z=0.0), goals[chosen]]
-        markers.append(line)
+        if active_goal is not None:
+            goal_dot = self._make_marker("goal", 0, Marker.SPHERE, 0.5)
+            goal_dot.pose.position = active_goal
+            markers.append(goal_dot)
+
+            goal_tag = self._make_marker("goal_tag", 0, Marker.TEXT_VIEW_FACING, 0.3)
+            goal_tag.pose.position = Point(x=active_goal.x, y=active_goal.y, z=0.7)
+            goal_tag.text = "GOAL"
+            markers.append(goal_tag)
+
+            line = self._make_marker("goal_line", 0, Marker.LINE_STRIP, 0.05)
+            line.points = [Point(x=robot[0], y=robot[1], z=0.0), active_goal]
+            markers.append(line)
 
         self._marker_pub.publish(MarkerArray(markers=markers))
 
@@ -236,6 +258,9 @@ class ExplorationNode(Node):
         return marker
 
     # --- helpers ----------------------------------------------------------
+
+    def _seconds_since(self, stamp) -> float:
+        return (self.get_clock().now() - stamp).nanoseconds / 1e9
 
     @staticmethod
     def _distance(point: Point, xy: Tuple[float, float]) -> float:
