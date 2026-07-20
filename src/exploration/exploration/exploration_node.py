@@ -49,6 +49,7 @@ class ExplorationNode(Node):
         self.declare_parameter("planning_period_s", 1.0)  # control-loop tick rate
         self.declare_parameter("free_threshold", 45)     # occupancy 0..this = free
         self.declare_parameter("min_cluster_size", 5)    # smaller clusters are noise
+        self.declare_parameter("obstacle_clearance_m", 0.35)  # frontier must clear walls
         self.declare_parameter("arrival_tolerance", 0.3)  # within this of goal = reached
         self.declare_parameter("goal_timeout_s", 30.0)    # give up on a goal after this
 
@@ -56,6 +57,7 @@ class ExplorationNode(Node):
         self._robot_frame = self.get_parameter("robot_frame").value
         self._free_threshold = self.get_parameter("free_threshold").value
         self._min_cluster_size = self.get_parameter("min_cluster_size").value
+        self._obstacle_clearance_m = self.get_parameter("obstacle_clearance_m").value
         self._arrival_tolerance = self.get_parameter("arrival_tolerance").value
         self._goal_timeout_s = self.get_parameter("goal_timeout_s").value
 
@@ -96,21 +98,32 @@ class ExplorationNode(Node):
 
     # --- step 1: frontier cells ------------------------------------------
 
-    def _frontier_mask(self, grid: np.ndarray) -> np.ndarray:
-        """True where a free cell touches unknown space (grid rows = y, cols = x).
+    def _frontier_mask(self, grid: np.ndarray, clearance_cells: int) -> np.ndarray:
+        """True where a free cell borders unknown space AND clears obstacles.
 
-        A cell borders unknown if any of the 8 shifted copies of the unknown
-        mask is set there -- computed with array math, no per-cell loop.
+        The clearance term drops free cells within `clearance_cells` of a wall,
+        so goals never land on imperfectly-mapped walls (which the planner would
+        reject) -- it mirrors the planner's obstacle inflation.
         """
         free = (grid >= 0) & (grid <= self._free_threshold)
         unknown = grid == UNKNOWN
-        padded = np.pad(unknown, 1, constant_values=False)  # False border, no wrap
-        h, w = grid.shape
-        borders_unknown = (
-            padded[0:h,     0:w] | padded[0:h,     1:w + 1] | padded[0:h,     2:w + 2] |
-            padded[1:h + 1, 0:w] |                            padded[1:h + 1, 2:w + 2] |
-            padded[2:h + 2, 0:w] | padded[2:h + 2, 1:w + 1] | padded[2:h + 2, 2:w + 2])
-        return free & borders_unknown
+        occupied = grid > self._free_threshold
+
+        borders_unknown = self._dilate(unknown, 1)
+        near_wall = self._dilate(occupied, clearance_cells)
+        return free & borders_unknown & ~near_wall
+
+    @staticmethod
+    def _dilate(mask: np.ndarray, cells: int) -> np.ndarray:
+        """Grow a boolean mask outward by `cells` in all 8 directions."""
+        h, w = mask.shape
+        for _ in range(cells):
+            padded = np.pad(mask, 1, constant_values=False)  # False border, no wrap
+            mask = (
+                padded[0:h,     0:w] | padded[0:h,     1:w + 1] | padded[0:h,     2:w + 2] |
+                padded[1:h + 1, 0:w] | padded[1:h + 1, 1:w + 1] | padded[1:h + 1, 2:w + 2] |
+                padded[2:h + 2, 0:w] | padded[2:h + 2, 1:w + 1] | padded[2:h + 2, 2:w + 2])
+        return mask
 
     # --- step 2: cluster the cells ---------------------------------------
 
@@ -162,7 +175,8 @@ class ExplorationNode(Node):
         robot = (pose[0], pose[1])
         info = self._map.info
         grid = np.array(self._map.data, dtype=np.int8).reshape(info.height, info.width)
-        clusters = self._find_clusters(self._frontier_mask(grid))
+        clearance_cells = max(1, round(self._obstacle_clearance_m / info.resolution))
+        clusters = self._find_clusters(self._frontier_mask(grid, clearance_cells))
 
         # Release the active goal once it is reached or has taken too long, so
         # the next idle cycle can commit to a fresh frontier.
