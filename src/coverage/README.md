@@ -23,11 +23,17 @@ One node, `coverage_node`, runs this loop on a timer:
 
 1. **Seen grid** — mark free cells that fall inside the camera's field-of-view
    cone (from `camera_info`) within `camera_range_m`, and not behind a wall.
-2. **Targets** — free cells not yet marked seen, and at least
-   `obstacle_clearance_m` from any wall.
+2. **Targets** — free cells at least `obstacle_clearance_m` from any wall that
+   are **not yet seen** by the camera **or** border unknown space. The
+   not-seen term is coverage; the borders-unknown term is exploration's
+   frontier, kept so the robot never quits while a glimpsed-but-unentered room
+   stays unexplored. One pass thus builds both maps.
 3. **Clusters** — flood-fill touching target cells into groups; drop groups
    smaller than `min_cluster_size`.
-4. **Nearest** — snap each cluster to a real free cell, pick the closest.
+4. **Nearest** — pick the closest unseen cluster, then aim at the cell
+   *farthest* across it (not the centroid, which for a blob surrounding the
+   robot would sit on the robot and be "reached" instantly). The goal is thus a
+   real drive, and the forward camera sweeps the unseen area on the way.
 5. **Goal pose** — publish it on `/goal_pose`, facing the unseen area. The
    planner and controller drive the robot there.
 
