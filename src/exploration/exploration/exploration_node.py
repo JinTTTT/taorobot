@@ -59,6 +59,7 @@ class ExplorationNode(Node):
         map_qos = QoSProfile(depth=1)
         map_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
         self._map: Optional[OccupancyGrid] = None
+        self._last_goal: Optional[Point] = None   # only publish when the goal changes
         self.create_subscription(
             OccupancyGrid, self.get_parameter("map_topic").value, self._on_map, map_qos)
 
@@ -166,12 +167,18 @@ class ExplorationNode(Node):
         chosen = min(range(len(goals)), key=lambda i: self._distance(goals[i], robot))
         goal = goals[chosen]
 
-        self.get_logger().info(
-            f"{len(clusters)} clusters | nearest #{chosen} "
-            f"({len(clusters[chosen])} cells) at ({goal.x:.2f}, {goal.y:.2f}), "
-            f"{self._distance(goal, robot):.2f} m")
+        # self.get_logger().info(
+        #     f"{len(clusters)} clusters | nearest #{chosen} "
+        #     f"({len(clusters[chosen])} cells) at ({goal.x:.2f}, {goal.y:.2f}), "
+        #     f"{self._distance(goal, robot):.2f} m")
 
-        self._publish_goal(goal, robot)
+        # Only publish when the goal moves to a different cell, so the planner
+        # plans once per goal instead of replanning the same goal every cycle.
+        if self._last_goal is None or \
+                self._distance(goal, (self._last_goal.x, self._last_goal.y)) > info.resolution:
+            self._publish_goal(goal, robot)
+            self._last_goal = goal
+
         self._publish_markers(clusters, goals, chosen, robot)
 
     # --- step 4: publish the goal pose -----------------------------------
