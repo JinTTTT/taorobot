@@ -1,14 +1,17 @@
 """Exploration node: nearest-frontier goal selection.
 
-Maps an area on its own, replacing the human clicking "2D Goal Pose". Each
-cycle it reads the live map, finds the frontier (the edge between free and
-unknown space), and sends the robot to the nearest one. When no frontier is
-left, the map is complete.
+Maps an area on its own, replacing the human clicking "2D Goal Pose". Each tick
+it reads the live map, finds the frontier (the edge between free and unknown
+space), and drives the robot to the nearest one; when no frontier is left, the
+map is complete.
 
-  step 1  frontier cells   free cells that touch unknown space
-  step 2  clusters         flood-fill touching frontier cells into groups
-  step 3  nearest          snap each cluster to a real cell, pick the closest
-  step 4  goal pose        publish it on /goal_pose, facing the unknown
+  step 1  frontier cells  free cells that border unknown space and clear walls
+  step 2  clusters        flood-fill touching frontier cells into groups
+  step 3  nearest         snap each cluster to a real cell, pick the closest
+  step 4  goal pose       publish it on /goal_pose, facing the unknown
+
+The chosen goal is committed until the robot reaches it, a wall is discovered
+near it, or it times out -- a goal is never interrupted mid-drive.
 
 Subscribes:  /map                    nav_msgs/OccupancyGrid
 Publishes:   /goal_pose              geometry_msgs/PoseStamped
@@ -67,6 +70,7 @@ class ExplorationNode(Node):
         self._map: Optional[OccupancyGrid] = None
         self._active_goal: Optional[Point] = None   # frontier we are driving to now
         self._goal_time = self.get_clock().now()    # when the active goal was chosen
+        self._complete = False                      # map done -> log completion once
         self.create_subscription(
             OccupancyGrid, self.get_parameter("map_topic").value, self._on_map, map_qos)
 
@@ -203,10 +207,13 @@ class ExplorationNode(Node):
                 self._active_goal = None
 
         if not clusters:
-            self.get_logger().info("no frontiers left - map complete")
+            if not self._complete:
+                self.get_logger().info("no frontiers left - map complete")
+                self._complete = True
             self._active_goal = None
             self._marker_pub.publish(MarkerArray(markers=[self._delete_all_marker()]))
             return
+        self._complete = False   # frontiers exist again
 
         goals = [self._goal_point(c, info) for c in clusters]
 
@@ -269,11 +276,11 @@ class ExplorationNode(Node):
 
         self._marker_pub.publish(MarkerArray(markers=markers))
 
-    def _make_marker(self, ns: str, mid: int, kind: int, scale: float) -> Marker:
+    def _make_marker(self, ns: str, marker_id: int, kind: int, scale: float) -> Marker:
         marker = Marker()
         marker.header.frame_id = self._map_frame
         marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns, marker.id, marker.type, marker.action = ns, mid, kind, Marker.ADD
+        marker.ns, marker.id, marker.type, marker.action = ns, marker_id, kind, Marker.ADD
         marker.scale.x = marker.scale.y = marker.scale.z = scale
         marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0
         return marker
