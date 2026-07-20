@@ -55,7 +55,7 @@ public:
     double free_probability = 0.05;
     double log_odds_min = -10.0;
     double log_odds_max = 10.0;
-    bool publish_unknown_for_unobserved = false;
+    bool publish_unknown_for_unobserved = true;   // never-observed cells -> -1 (standard "unknown")
   };
 
   // Cells whose occupancy state crossed zero during scan integration.

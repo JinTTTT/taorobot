@@ -70,7 +70,7 @@ private:
     planner_.setMap(map_, this->now());
     inflated_map_pub_->publish(planner_.inflatedMap());
 
-    RCLCPP_INFO(
+    RCLCPP_INFO_ONCE(
       this->get_logger(),
       "Map received: %u x %u cells, resolution %.3f m. Inflated by %.2f m (%d cells).",
       map_.info.width,

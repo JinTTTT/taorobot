@@ -1,0 +1,17 @@
+/**:
+  ros__parameters:
+    map_topic: /map          # live occupancy grid to explore
+    goal_topic: /goal_pose   # next exploration goal (PoseStamped, map frame)
+    map_frame: map
+    robot_frame: base_link
+    planning_period_s: 1.0   # control-loop tick: check arrival/timeout, re-pick when idle
+    free_threshold: 45       # occupancy 0..this = drivable free cell (unknown is -1)
+                             # freshly ray-traced free cells sit ~35, so keep this
+                             # above that but below occupied (~70)
+    min_cluster_size: 5      # drop frontier clusters smaller than this many cells
+    obstacle_clearance_m: 0.35 #0.35 + 0.15  # frontier cells must be at least this far from walls,
+                                # so goals stay reachable. Match motion_planning's
+                                # robot_radius_m (0.35) -- the planner rejects goals
+                                # inside that inflation.
+    arrival_tolerance: 0.6   # within this distance of the goal counts as reached
+    goal_timeout_s: 30.0     # give up on a goal (re-pick) after this many seconds
