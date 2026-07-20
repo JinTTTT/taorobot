@@ -69,10 +69,11 @@ Robot and camera poses come from TF (`map → base_link`, `map → camera frame`
 
 ## Run
 
-Coverage needs the camera, so start the **semantic** simulation (office world
-with objects + OAK-D camera bridge + semantic mapping), not the plain one:
+Coverage needs the camera, so start the camera-enabled simulation (not the plain
+one). It defaults to the simple room; pass `world:=office_world.sdf` for the
+object-filled office:
 
 ```bash
-ros2 launch simulation semantic_bringup_simulation.launch.py   # 1. sim + camera + semantic mapping
+ros2 launch simulation semantic_bringup_simulation.launch.py   # 1. simple room + camera
 ros2 launch coverage coverage_bringup.launch.py                # 2. occupancy mapping + planner + controller + coverage
 ```

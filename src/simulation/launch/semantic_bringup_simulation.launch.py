@@ -1,8 +1,10 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
+                            SetEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile
 
@@ -11,11 +13,12 @@ def generate_launch_description():
     """
     Self-contained bringup for the semantic-mapping demo.
 
-    Unlike bringup_simulation.launch.py (plain sim, my_world.sdf), this launch
-    file brings up the office world populated with detectable objects, the
-    OAK-D camera bridge, the depth/localization helper nodes, and the
-    semantic_mapping perception + map nodes. Start this when you want semantic
-    mapping; use bringup_simulation.launch.py for the plain simulation.
+    Like bringup_simulation.launch.py but with the OAK-D camera bridge, the
+    depth/localization helper nodes, and the semantic_mapping perception + map
+    nodes. The world is selectable (default my_world.sdf, the plain simple_room);
+    pass world:=office_world.sdf for the object-filled office needed to actually
+    see detections. Start this when you want the camera (coverage or semantic
+    mapping); use bringup_simulation.launch.py for the plain camera-less sim.
     """
 
     sim_pkg = get_package_share_directory('simulation')
@@ -33,13 +36,18 @@ def generate_launch_description():
     with open(urdf_file, 'r') as infp:
         robot_desc = infp.read()
 
-    # Start Gazebo with the office world (populated with detectable objects).
-    world_file = os.path.join(sim_pkg, 'worlds', 'office_world.sdf')
+    # World is selectable: default my_world.sdf (the plain simple_room);
+    # pass world:=office_world.sdf for the object-filled office (semantic mapping).
+    # Both worlds are named "empty", so the ground-truth pose bridge is unchanged.
+    world_arg = DeclareLaunchArgument(
+        'world', default_value='my_world.sdf',
+        description='world file in simulation/worlds (my_world.sdf | office_world.sdf)')
+    world_path = PathJoinSubstitution([sim_pkg, 'worlds', LaunchConfiguration('world')])
     start_gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
         ),
-        launch_arguments={'gz_args': f'-r {world_file}'}.items()
+        launch_arguments={'gz_args': ['-r ', world_path]}.items()
     )
 
     robot_state_publisher = Node(
@@ -135,6 +143,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        world_arg,
         gazebo_model_path_env,
         start_gazebo,
         robot_state_publisher,
