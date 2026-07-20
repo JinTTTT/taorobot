@@ -9,9 +9,9 @@
                              # freshly ray-traced free cells sit ~35, so keep this
                              # above that but below occupied (~70)
     min_cluster_size: 5      # drop frontier clusters smaller than this many cells
-    obstacle_clearance_m: 0.35  # frontier cells must be at least this far from walls,
+    obstacle_clearance_m: 0.35 #0.35 + 0.15  # frontier cells must be at least this far from walls,
                                 # so goals stay reachable. Match motion_planning's
                                 # robot_radius_m (0.35) -- the planner rejects goals
                                 # inside that inflation.
-    arrival_tolerance: 0.3   # within this distance of the goal counts as reached
+    arrival_tolerance: 0.6   # within this distance of the goal counts as reached
     goal_timeout_s: 30.0     # give up on a goal (re-pick) after this many seconds
